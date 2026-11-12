@@ -2,23 +2,49 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include "app/i18n.h"
 #include "app/session.h"
 
 /* ------------------------------------------------------------ built-in presets */
 
-typedef struct { const char *name; const char *cmds[12]; } BuiltinPreset;
+/* key = stable id stored in settings.ini; en/pl = display names (both accepted as input) */
+typedef struct { const char *key, *en, *pl; const char *cmds[12]; } BuiltinPreset;
 
 static const BuiltinPreset k_builtin[] = {
-    { "Domyślny", { NULL } },
-    { "Głośne otoczenie", { "set highpass freq 100", "set rnnoise wet 1", "set gate threshold 0.6",
-                            "set gate floor -70", "set gate hold 200", NULL } },
-    { "Podcast", { "set highpass freq 70", "set comp threshold -24", "set comp ratio 3.5",
-                   "set comp makeup 5", "set eq low 2", "set eq mid -1", "set eq high 3",
-                   "set limiter ceiling -1.5", NULL } },
-    { "Naturalny", { "set rnnoise wet 0.85", "set gate threshold 0.4", "set gate floor -25",
-                     "set comp ratio 2", "set comp makeup 1", NULL } },
+    { "default", "Default", "Domyślny", { NULL } },
+    { "noisy", "Noisy room", "Głośne otoczenie",
+      { "set highpass freq 100", "set rnnoise wet 1", "set gate threshold 0.6",
+        "set gate floor -70", "set gate hold 200", NULL } },
+    { "podcast", "Podcast", "Podcast",
+      { "set highpass freq 70", "set comp threshold -24", "set comp ratio 3.5",
+        "set comp makeup 5", "set eq low 2", "set eq mid -1", "set eq high 3",
+        "set limiter ceiling -1.5", NULL } },
+    { "natural", "Natural", "Naturalny",
+      { "set rnnoise wet 0.85", "set gate threshold 0.4", "set gate floor -25",
+        "set comp ratio 2", "set comp makeup 1", NULL } },
 };
 #define N_BUILTIN ((int)(sizeof k_builtin / sizeof k_builtin[0]))
+
+static int find_builtin(const char *name)
+{
+    for (int i = 0; i < N_BUILTIN; i++)
+        if (!strcmp(k_builtin[i].key, name) || !strcmp(k_builtin[i].en, name) || !strcmp(k_builtin[i].pl, name))
+            return i;
+    return -1;
+}
+
+const char *vf_preset_key(const char *name)
+{
+    int i = find_builtin(name);
+    return i >= 0 ? k_builtin[i].key : name;
+}
+
+const char *vf_preset_display_name(const VfPresetInfo *p)
+{
+    int i = p->builtin ? find_builtin(p->name) : -1;
+    if (i < 0) return p->name;
+    return vf_i18n_get() == VF_LANG_PL ? k_builtin[i].pl : k_builtin[i].en;
+}
 
 /* ------------------------------------------------------------ helpers */
 
@@ -46,7 +72,8 @@ void vf_settings_defaults(VfSettings *s)
     memset(s, 0, sizeof *s);
     s->mode = VF_OUT_VMIC;
     s->start_processing = 0;
-    copy(s->preset, sizeof s->preset, "Domyślny");
+    copy(s->preset, sizeof s->preset, "default");
+    copy(s->language, sizeof s->language, "en");
 }
 
 int vf_settings_path(char *out, size_t n)
@@ -136,7 +163,9 @@ int vf_settings_load(VfSettings *s, Pipeline *p, const char *path)
     s->start_processing = vf_ini_get_int(&ini, "app", "start_processing", s->start_processing) != 0;
     s->background = vf_ini_get_int(&ini, "app", "background", s->background) != 0;
     const char *pr = vf_ini_get(&ini, "app", "preset");
-    if (pr) copy(s->preset, sizeof s->preset, pr);
+    if (pr) copy(s->preset, sizeof s->preset, vf_preset_key(pr));   /* old files stored Polish names */
+    const char *lang = vf_ini_get(&ini, "app", "language");
+    if (lang) copy(s->language, sizeof s->language, lang);
     if (p) {
         vf_fx_apply_ini(p, &ini);
         atomic_store(&p->bypass_all, s->bypass);
@@ -153,9 +182,9 @@ int vf_settings_save(const VfSettings *s, const Pipeline *p, const char *path)
     if (!f) return -1;
     fprintf(f, "; VoiceFilter settings - written automatically, safe to edit while the app is closed\n"
                "[audio]\ninput = %s\noutput = %s\nmonitor = %s\nmode = %s\nbypass = %d\n"
-               "\n[app]\nstart_processing = %d\nbackground = %d\npreset = %s\n",
+               "\n[app]\nlanguage = %s\nstart_processing = %d\nbackground = %d\npreset = %s\n",
             s->input, s->output, s->monitor, mode_name(s->mode), s->bypass,
-            s->start_processing, s->background, s->preset);
+            s->language, s->start_processing, s->background, s->preset);
     if (p) vf_fx_write_ini(f, p);
     if (fclose(f) != 0) { vf_remove(tmp); return -1; }
     return vf_replace_file(tmp, path);
@@ -193,9 +222,7 @@ int vf_preset_sanitize(const char *in, char *out, size_t n)
 
 int vf_preset_is_builtin(const char *name)
 {
-    for (int i = 0; i < N_BUILTIN; i++)
-        if (!strcmp(k_builtin[i].name, name)) return 1;
-    return 0;
+    return find_builtin(name) >= 0;
 }
 
 typedef struct { VfPresetInfo *out; int max, n; } ListCtx;
@@ -218,7 +245,7 @@ int vf_presets_list(VfPresetInfo *out, int max)
 {
     int n = 0;
     for (int i = 0; i < N_BUILTIN && n < max; i++) {
-        copy(out[n].name, sizeof out[n].name, k_builtin[i].name);
+        copy(out[n].name, sizeof out[n].name, k_builtin[i].key);
         out[n++].builtin = 1;
     }
     char dir[VF_PATH_MAX];
@@ -233,8 +260,8 @@ int vf_presets_list(VfPresetInfo *out, int max)
 
 int vf_preset_apply(Pipeline *p, const char *name)
 {
-    for (int i = 0; i < N_BUILTIN; i++) {
-        if (strcmp(k_builtin[i].name, name)) continue;
+    const int i = find_builtin(name);
+    if (i >= 0) {
         vf_fx_reset(p);
         for (int k = 0; k_builtin[i].cmds[k]; k++) {
             /* built-in presets are "set <fx> <param> <value>" lines */

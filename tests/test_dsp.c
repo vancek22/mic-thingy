@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "app/i18n.h"
 #include "app/session.h"
 #include "app/settings.h"
 #include "audio/engine.h"
@@ -580,7 +581,8 @@ static void test_settings_presets(void)
     s.mode = VF_OUT_VMIC_MONITOR;
     s.start_processing = 1;
     s.bypass = 1;
-    snprintf(s.preset, sizeof s.preset, "Podcast");
+    snprintf(s.preset, sizeof s.preset, "podcast");
+    snprintf(s.language, sizeof s.language, "pl");
     pipeline_set_param(&p1, 2, GATE_THRESHOLD, 0.37f);
     pipeline_set_param(&p1, 3, COMP_RATIO, 4.25f);
     pipeline_set_param(&p1, 4, EQ_HIGH_DB, -3.5f);
@@ -592,7 +594,13 @@ static void test_settings_presets(void)
     vf_settings_defaults(&r);
     CHECK(vf_settings_load(&r, &p2, path) == 0, "load");
     CHECK(!strcmp(r.input, s.input) && !strcmp(r.output, s.output) && r.mode == s.mode &&
-          r.start_processing == 1 && r.bypass == 1 && !strcmp(r.preset, "Podcast"), "settings fields round trip");
+          r.start_processing == 1 && r.bypass == 1 && !strcmp(r.preset, "podcast") && !strcmp(r.language, "pl"),
+          "settings fields round trip");
+    {
+        VfSettings d;
+        vf_settings_defaults(&d);
+        CHECK(!strcmp(d.language, "en"), "English is the default language");
+    }
     int same = 1;
     for (int i = 0; i < p1.count; i++) {
         if (atomic_load(&p1.fx[i]->bypass) != atomic_load(&p2.fx[i]->bypass)) same = 0;
@@ -612,7 +620,21 @@ static void test_settings_presets(void)
     /* presets */
     VfPresetInfo list[VF_MAX_PRESETS];
     int n = vf_presets_list(list, VF_MAX_PRESETS);
-    CHECK(n >= 4 && list[0].builtin && !strcmp(list[0].name, "Domyślny"), "built-ins listed (%d)", n);
+    CHECK(n >= 4 && list[0].builtin && !strcmp(list[0].name, "default"), "built-ins listed by key (%d)", n);
+    CHECK(!strcmp(vf_preset_display_name(&list[0]), "Default"), "English display name by default");
+    vf_i18n_set(VF_LANG_PL);
+    CHECK(!strcmp(vf_preset_display_name(&list[0]), "Domyślny"), "Polish display name");
+    CHECK(!strcmp(tr(S_MICROPHONE), "Mikrofon") && !strcmp(tr_fx("gate"), "Bramka szumów (VAD)"), "Polish strings");
+    vf_i18n_set(VF_LANG_EN);
+    CHECK(!strcmp(tr(S_MICROPHONE), "Microphone") && !strcmp(tr_param("comp", "ratio"), "Ratio"), "English strings");
+    CHECK(!strcmp(vf_preset_key("Głośne otoczenie"), "noisy") && !strcmp(vf_preset_key("Noisy room"), "noisy"),
+          "both languages map to the preset key");
+    for (int id = 0; id < S_COUNT; id++) {
+        vf_i18n_set(VF_LANG_PL);
+        const char *pl = tr((VfStr)id);
+        vf_i18n_set(VF_LANG_EN);
+        CHECK(pl && pl[0] && tr((VfStr)id)[0], "string %d missing a translation", id);
+    }
     for (int i = 0; i < n; i++)
         if (list[i].builtin) CHECK(vf_preset_apply(&p2, list[i].name) == 0, "built-in '%s' applies", list[i].name);
     vf_preset_apply(&p2, "Podcast");

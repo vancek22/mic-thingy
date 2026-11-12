@@ -28,7 +28,9 @@ void vf_tray_set_state(int running, int bypass)
 #ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
+#include <stdio.h>
 #include <wchar.h>
+#include "app/i18n.h"
 
 #define WM_TRAY      (WM_APP + 1)
 #define WM_SHOWMAIN  (WM_APP + 2)        /* sent by a second instance */
@@ -44,7 +46,7 @@ static DWORD g_thread_id;
 static HWND g_hwnd;
 static NOTIFYICONDATAW g_nid;
 static HICON g_icon_on, g_icon_off;
-static int g_last_running = -1, g_last_bypass = -1;
+static int g_last_running = -1, g_last_bypass = -1, g_last_lang = -1;
 static UINT g_taskbar_created;
 
 /* 16x16 microphone-ish icon drawn at runtime (green = filtering, grey = stopped). */
@@ -100,14 +102,16 @@ static HICON make_icon(COLORREF c)
 
 static void update_icon(void)
 {
-    int run = atomic_load(&g_running), byp = atomic_load(&g_bypass);
-    if (run == g_last_running && byp == g_last_bypass) return;
+    int run = atomic_load(&g_running), byp = atomic_load(&g_bypass), lang = (int)vf_i18n_get();
+    if (run == g_last_running && byp == g_last_bypass && lang == g_last_lang) return;
     g_last_running = run;
     g_last_bypass = byp;
+    g_last_lang = lang;
     g_nid.uFlags = NIF_ICON | NIF_TIP;
     g_nid.hIcon = run && !byp ? g_icon_on : g_icon_off;
-    swprintf(g_nid.szTip, sizeof g_nid.szTip / sizeof g_nid.szTip[0], L"VoiceFilter - %ls",
-             !run ? L"zatrzymany" : byp ? L"filtr wyłączony (bypass)" : L"filtruje");
+    char tip[128];
+    snprintf(tip, sizeof tip, "VoiceFilter - %s", tr(!run ? S_TRAY_TIP_STOPPED : byp ? S_TRAY_TIP_BYPASS : S_TRAY_TIP_ON));
+    MultiByteToWideChar(CP_UTF8, 0, tip, -1, g_nid.szTip, (int)(sizeof g_nid.szTip / sizeof g_nid.szTip[0]));
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
 }
 
@@ -115,7 +119,7 @@ static void add_icon(void)
 {
     g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     Shell_NotifyIconW(NIM_ADD, &g_nid);
-    g_last_running = g_last_bypass = -1;
+    g_last_running = g_last_bypass = g_last_lang = -1;
     update_icon();
 }
 
@@ -123,12 +127,15 @@ static void show_menu(HWND h)
 {
     HMENU m = CreatePopupMenu();
     const int run = atomic_load(&g_running), byp = atomic_load(&g_bypass);
-    AppendMenuW(m, MF_STRING, ID_SHOW, L"Pokaż okno");
+    wchar_t w[4][96];
+    const VfStr ids[4] = { S_TRAY_SHOW, S_TRAY_PROCESSING, S_TRAY_FILTER, S_TRAY_QUIT };
+    for (int i = 0; i < 4; i++) MultiByteToWideChar(CP_UTF8, 0, tr(ids[i]), -1, w[i], 96);
+    AppendMenuW(m, MF_STRING, ID_SHOW, w[0]);
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(m, MF_STRING | (run ? MF_CHECKED : 0), ID_RUN, L"Przetwarzanie dźwięku");
-    AppendMenuW(m, MF_STRING | (run && !byp ? MF_CHECKED : 0) | (run ? 0 : MF_GRAYED), ID_BYPASS, L"Filtr włączony");
+    AppendMenuW(m, MF_STRING | (run ? MF_CHECKED : 0), ID_RUN, w[1]);
+    AppendMenuW(m, MF_STRING | (run && !byp ? MF_CHECKED : 0) | (run ? 0 : MF_GRAYED), ID_BYPASS, w[2]);
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(m, MF_STRING, ID_QUIT, L"Zakończ VoiceFilter");
+    AppendMenuW(m, MF_STRING, ID_QUIT, w[3]);
     SetMenuDefaultItem(m, ID_SHOW, FALSE);
     POINT p;
     GetCursorPos(&p);

@@ -1,7 +1,7 @@
-/* VoiceFilter GUI (raylib + raygui).
+/* VoiceFilter GUI (raylib + raygui) - early-2000s "green phosphor" look.
  *
- *   voicefilter [--autostart] [--mode 0|1|2] [--in-file f.wav]
- *               [--screenshot shot.png --frames N]      (testing: render N frames, save, quit)
+ *   voicefilter [--autostart] [--minimized] [--mode 0|1|2] [--lang en|pl] [--in-file f.wav]
+ *               [--screenshot shot.png --frames N] [--verbose]
  *
  * The audio runs on miniaudio's thread; this thread only writes parameters
  * (atomics via pipeline_set_param) and drains the meter ring buffer. */
@@ -14,6 +14,7 @@
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
 
+#include "app/i18n.h"
 #include "app/session.h"
 #include "app/settings.h"
 #include "app/tray.h"
@@ -21,59 +22,203 @@
 #include "util/wavio.h"
 
 #define WIN_W 1180
-#define WIN_H 754
-#define TOP   134          /* y of the meter / effect panels */
+#define WIN_H 792
+#define HEADER_H 48
+#define TOP   172          /* y of the meter / effect panels */
 #define LIST_CHARS 8192
 #define NAME_MAX_CHARS 44
 
-/* ------------------------------------------------------------------ labels */
+/* ------------------------------------------------------------------ theme */
 
-static const char *fx_title(const char *name)
+#define C_BG_TOP     (Color){ 20, 30, 19, 255 }
+#define C_BG_BOTTOM  (Color){ 7, 11, 7, 255 }
+#define C_PANEL      (Color){ 11, 19, 11, 255 }
+#define C_BEVEL_HI   (Color){ 70, 120, 62, 255 }
+#define C_BEVEL_LO   (Color){ 2, 4, 2, 255 }
+#define C_EDGE       (Color){ 31, 64, 27, 255 }
+#define C_NEON       (Color){ 57, 255, 20, 255 }
+#define C_TEXT       (Color){ 140, 242, 122, 255 }
+#define C_TEXT_DIM   (Color){ 76, 138, 68, 255 }
+#define C_LCD_BG     (Color){ 3, 14, 3, 255 }
+#define C_SEG_OFF    (Color){ 16, 40, 16, 255 }
+#define C_AMBER      (Color){ 255, 196, 40, 255 }
+#define C_RED        (Color){ 255, 64, 48, 255 }
+
+typedef struct { Font ui, bold, title, lcd, lcd_big; } Fonts;
+static Fonts F;
+
+static Font load_font(const char *const *paths, int npaths, int size)
 {
-    if (!strcmp(name, "highpass")) return "Filtr górnoprzepustowy";
-    if (!strcmp(name, "rnnoise"))  return "Odszumianie (RNNoise)";
-    if (!strcmp(name, "gate"))     return "Bramka szumów (VAD)";
-    if (!strcmp(name, "comp"))     return "Kompresor";
-    if (!strcmp(name, "eq"))       return "Korektor 3-pasmowy";
-    if (!strcmp(name, "limiter"))  return "Limiter";
-    return name;
+    int cps[95 + 224], n = 0;
+    for (int c = 32; c < 127; c++) cps[n++] = c;
+    for (int c = 160; c < 384; c++) cps[n++] = c;      /* Latin-1 + Latin Extended-A (Polish) */
+    for (int i = 0; i < npaths; i++)
+        if (FileExists(paths[i])) {
+            Font f = LoadFontEx(paths[i], size, cps, n);
+            if (f.texture.id != 0) return f;
+        }
+    return GetFontDefault();
 }
 
-static const char *param_label(const char *fx, const char *p)
+static void load_fonts(void)
 {
-    static const char *map[][3] = {
-        { "highpass", "freq", "Częstotliwość" },
-        { "rnnoise", "wet", "Siła" },
-        { "rnnoise", "lookahead", "Wyprzedzenie (+10 ms, lepsza jakość)" },
-        { "gate", "threshold", "Próg głosu" },
-        { "gate", "hold", "Podtrzymanie" },
-        { "gate", "attack", "Otwieranie" },
-        { "gate", "release", "Zamykanie" },
-        { "gate", "floor", "Tłumienie" },
-        { "comp", "threshold", "Próg" },
-        { "comp", "ratio", "Stosunek" },
-        { "comp", "attack", "Atak" },
-        { "comp", "release", "Powrót" },
-        { "comp", "makeup", "Wzmocnienie" },
-        { "comp", "knee", "Kolano" },
-        { "eq", "low", "Basy" },
-        { "eq", "mid", "Środek" },
-        { "eq", "high", "Góra" },
-        { "eq", "lowfreq", "Basy - częst." },
-        { "eq", "midfreq", "Środek - częst." },
-        { "eq", "midq", "Środek - Q" },
-        { "eq", "highfreq", "Góra - częst." },
-        { "limiter", "ceiling", "Sufit" },
-        { "limiter", "release", "Powrót" },
-    };
-    for (size_t i = 0; i < sizeof map / sizeof map[0]; i++)
-        if (!strcmp(map[i][0], fx) && !strcmp(map[i][1], p)) return map[i][2];
-    return p;
+    static const char *ui[] = { "C:/Windows/Fonts/tahoma.ttf", "C:/Windows/Fonts/verdana.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf" };
+    static const char *bold[] = { "C:/Windows/Fonts/tahomabd.ttf", "C:/Windows/Fonts/verdanab.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" };
+    static const char *mono[] = { "C:/Windows/Fonts/lucon.ttf", "C:/Windows/Fonts/consola.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+        "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf", "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf" };
+#define N(a) (int)(sizeof a / sizeof a[0])
+    F.ui = load_font(ui, N(ui), 16);
+    F.bold = load_font(bold, N(bold), 14);
+    F.title = load_font(bold, N(bold), 28);
+    F.lcd = load_font(mono, N(mono), 14);
+    F.lcd_big = load_font(mono, N(mono), 20);
+#undef N
+}
+
+static void unload_fonts(void)
+{
+    Font *all[] = { &F.ui, &F.bold, &F.title, &F.lcd, &F.lcd_big };
+    for (size_t i = 0; i < sizeof all / sizeof all[0]; i++)
+        if (all[i]->texture.id != GetFontDefault().texture.id) UnloadFont(*all[i]);
+}
+
+static int hexc(Color c) { return ColorToInt(c); }
+
+static void apply_style(void)
+{
+    /* Order matters: GuiLoadStyleDefault() unloads the texture of a previously set
+     * custom font, so reset the style first and set our font afterwards. */
+    GuiLoadStyleDefault();
+    GuiSetFont(F.ui);
+    GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
+    GuiSetStyle(DEFAULT, TEXT_SPACING, 0);
+    GuiSetStyle(DEFAULT, BORDER_WIDTH, 1);
+    GuiSetStyle(DEFAULT, BORDER_COLOR_NORMAL, hexc((Color){ 47, 125, 34, 255 }));
+    GuiSetStyle(DEFAULT, BASE_COLOR_NORMAL, hexc((Color){ 15, 29, 14, 255 }));
+    GuiSetStyle(DEFAULT, TEXT_COLOR_NORMAL, hexc(C_TEXT));
+    GuiSetStyle(DEFAULT, BORDER_COLOR_FOCUSED, hexc((Color){ 125, 255, 92, 255 }));
+    GuiSetStyle(DEFAULT, BASE_COLOR_FOCUSED, hexc((Color){ 28, 58, 23, 255 }));
+    GuiSetStyle(DEFAULT, TEXT_COLOR_FOCUSED, hexc((Color){ 200, 255, 184, 255 }));
+    GuiSetStyle(DEFAULT, BORDER_COLOR_PRESSED, hexc((Color){ 182, 255, 156, 255 }));
+    GuiSetStyle(DEFAULT, BASE_COLOR_PRESSED, hexc((Color){ 47, 160, 31, 255 }));
+    GuiSetStyle(DEFAULT, TEXT_COLOR_PRESSED, hexc((Color){ 4, 16, 4, 255 }));
+    GuiSetStyle(DEFAULT, BORDER_COLOR_DISABLED, hexc((Color){ 28, 46, 26, 255 }));
+    GuiSetStyle(DEFAULT, BASE_COLOR_DISABLED, hexc((Color){ 11, 19, 11, 255 }));
+    GuiSetStyle(DEFAULT, TEXT_COLOR_DISABLED, hexc((Color){ 47, 74, 43, 255 }));
+    GuiSetStyle(DEFAULT, LINE_COLOR, hexc((Color){ 47, 125, 34, 255 }));
+    GuiSetStyle(DEFAULT, BACKGROUND_COLOR, hexc(C_PANEL));
+    GuiSetStyle(SLIDER, BORDER_WIDTH, 1);
+    GuiSetStyle(SLIDER, SLIDER_PADDING, 1);
+    GuiSetStyle(SLIDER, BASE_COLOR_NORMAL, hexc(C_LCD_BG));
+    GuiSetStyle(TEXTBOX, BASE_COLOR_PRESSED, hexc(C_LCD_BG));
+    GuiSetStyle(TEXTBOX, TEXT_COLOR_PRESSED, hexc(C_NEON));
+    GuiSetStyle(TEXTBOX, BORDER_COLOR_PRESSED, hexc(C_NEON));
+    GuiSetStyle(DROPDOWNBOX, TEXT_ALIGNMENT, TEXT_ALIGN_LEFT);
+    GuiSetStyle(DROPDOWNBOX, TEXT_PADDING, 8);
+}
+
+static void text(Font f, const char *s, float x, float y, Color c)
+{
+    DrawTextEx(f, s, (Vector2){ x, y }, (float)f.baseSize, 0, c);
+}
+
+static void glow_text(Font f, const char *s, float x, float y, Color c)
+{
+    Color g = c;
+    g.a = 50;
+    for (int dx = -1; dx <= 1; dx++)
+        for (int dy = -1; dy <= 1; dy++)
+            if (dx || dy) DrawTextEx(f, s, (Vector2){ x + 2 * dx, y + 2 * dy }, (float)f.baseSize, 0, g);
+    DrawTextEx(f, s, (Vector2){ x, y }, (float)f.baseSize, 0, c);
+}
+
+/* Raised 3D frame (Win2000-style bevel) with an optional green title strip. */
+static void bevel(Rectangle r, int raised)
+{
+    Color hi = raised ? C_BEVEL_HI : C_BEVEL_LO, lo = raised ? C_BEVEL_LO : C_BEVEL_HI;
+    DrawRectangleRec(r, C_PANEL);
+    DrawLineEx((Vector2){ r.x, r.y + 1 }, (Vector2){ r.x + r.width, r.y + 1 }, 2, hi);
+    DrawLineEx((Vector2){ r.x + 1, r.y }, (Vector2){ r.x + 1, r.y + r.height }, 2, hi);
+    DrawLineEx((Vector2){ r.x, r.y + r.height - 1 }, (Vector2){ r.x + r.width, r.y + r.height - 1 }, 2, lo);
+    DrawLineEx((Vector2){ r.x + r.width - 1, r.y }, (Vector2){ r.x + r.width - 1, r.y + r.height }, 2, lo);
+    DrawRectangleLinesEx((Rectangle){ r.x + 3, r.y + 3, r.width - 6, r.height - 6 }, 1, C_EDGE);
+}
+
+static void panel(Rectangle r, const char *title, int led)
+{
+    bevel(r, 1);
+    Rectangle t = { r.x + 4, r.y + 4, r.width - 8, 24 };
+    DrawRectangleGradientH((int)t.x, (int)t.y, (int)t.width, (int)t.height,
+                           (Color){ 30, 92, 22, 255 }, (Color){ 8, 26, 7, 255 });
+    DrawLine((int)t.x, (int)t.y, (int)(t.x + t.width), (int)t.y, (Color){ 120, 220, 100, 120 });
+    float x = t.x + 8;
+    if (led >= 0) {
+        DrawCircle((int)x + 4, (int)(t.y + 12), 4.5f, led ? C_NEON : C_SEG_OFF);
+        if (led) DrawCircle((int)x + 4, (int)(t.y + 12), 8, (Color){ 57, 255, 20, 40 });
+        x += 16;
+    }
+    text(F.bold, title, x, t.y + 5, (Color){ 220, 255, 210, 255 });
+}
+
+/* LCD window: dark inset with faint scanlines. */
+static void lcd(Rectangle r)
+{
+    DrawRectangleRec(r, C_LCD_BG);
+    for (int y = (int)r.y + 1; y < (int)(r.y + r.height); y += 2)
+        DrawLine((int)r.x, y, (int)(r.x + r.width), y, (Color){ 0, 0, 0, 70 });
+    DrawRectangleLinesEx(r, 1, C_EDGE);
+}
+
+/* Segmented LED meter, -60..0 dBFS: green / amber (> -18) / red (> -6), peak-hold segment. */
+static void led_meter(Rectangle r, float db, float hold_db)
+{
+    lcd(r);
+    const int seg_w = 4, gap = 2;
+    const int n = (int)((r.width - 4) / (seg_w + gap));
+    const float t = (db + 60.0f) / 60.0f, h = (hold_db + 60.0f) / 60.0f;
+    const int hold_seg = (int)(h * n);
+    for (int i = 0; i < n; i++) {
+        const float pos = (float)(i + 1) / n;
+        const float seg_db = pos * 60.0f - 60.0f;
+        Color on = seg_db > -6 ? C_RED : seg_db > -18 ? C_AMBER : C_NEON;
+        Color off = { (unsigned char)(on.r / 7), (unsigned char)(on.g / 7), (unsigned char)(on.b / 7), 255 };
+        const int lit = pos <= t || i == hold_seg - 1;
+        DrawRectangle((int)r.x + 2 + i * (seg_w + gap), (int)r.y + 3, seg_w, (int)r.height - 6, lit ? on : off);
+    }
+}
+
+static void led_bar(Rectangle r, float t, Color on)
+{
+    lcd(r);
+    const int seg_w = 4, gap = 2;
+    const int n = (int)((r.width - 4) / (seg_w + gap));
+    Color off = { (unsigned char)(on.r / 7), (unsigned char)(on.g / 7), (unsigned char)(on.b / 7), 255 };
+    for (int i = 0; i < n; i++)
+        DrawRectangle((int)r.x + 2 + i * (seg_w + gap), (int)r.y + 3, seg_w, (int)r.height - 6,
+                      (float)(i + 1) / n <= t ? on : off);
+}
+
+static void background(void)
+{
+    DrawRectangleGradientV(0, 0, WIN_W, WIN_H, C_BG_TOP, C_BG_BOTTOM);
+    for (int x = 0; x < WIN_W; x += 24)                          /* faint grid */
+        DrawLine(x, HEADER_H, x, WIN_H, (Color){ 57, 255, 20, 6 });
+    for (int y = HEADER_H; y < WIN_H; y += 24)
+        DrawLine(0, y, WIN_W, y, (Color){ 57, 255, 20, 6 });
+    /* header: brushed "chrome" strip with a neon underline */
+    DrawRectangleGradientV(0, 0, WIN_W, HEADER_H, (Color){ 34, 70, 28, 255 }, (Color){ 9, 22, 8, 255 });
+    DrawLine(0, 1, WIN_W, 1, (Color){ 150, 230, 130, 90 });
+    DrawRectangle(0, HEADER_H - 2, WIN_W, 2, C_NEON);
+    DrawRectangle(0, HEADER_H, WIN_W, 6, (Color){ 57, 255, 20, 30 });
 }
 
 /* ------------------------------------------------------------------ helpers */
 
-/* raygui list text: "a;b;c" (';' inside names replaced, long names shortened). */
 static void build_list(char *out, size_t cap, const VfDeviceList *l)
 {
     out[0] = '\0';
@@ -88,33 +233,7 @@ static void build_list(char *out, size_t cap, const VfDeviceList *l)
         name[n] = '\0';
         len += (size_t)snprintf(out + len, cap - len, "%s%s", i ? ";" : "", name);
     }
-    if (l->count == 0) snprintf(out, cap, "(brak urządzeń)");
-}
-
-static Font load_ui_font(int size)
-{
-    static const char *paths[] = {
-        "C:/Windows/Fonts/segoeui.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-    };
-    int cps[95 + 224];
-    int n = 0;
-    for (int c = 32; c < 127; c++) cps[n++] = c;
-    for (int c = 160; c < 384; c++) cps[n++] = c;      /* Latin-1 + Latin Extended-A (Polish) */
-    for (size_t i = 0; i < sizeof paths / sizeof paths[0]; i++)
-        if (FileExists(paths[i])) {
-            Font f = LoadFontEx(paths[i], size, cps, n);
-            if (f.texture.id != 0) {
-                SetTextureFilter(f.texture, TEXTURE_FILTER_BILINEAR);
-                return f;
-            }
-        }
-    return GetFontDefault();
+    if (l->count == 0) snprintf(out, cap, "%s", tr(S_NO_DEVICES));
 }
 
 static float lin_to_db(float x) { return x > 1e-6f ? 20.0f * log10f(x) : -120.0f; }
@@ -143,7 +262,7 @@ static void drain_meters(VfSession *s, Meters *m, float dt)
             frames++;
         }
     }
-    const float fall = 30.0f * dt;                     /* dB per frame of decay */
+    const float fall = 30.0f * dt;
     float din = lin_to_db(pin), dout = lin_to_db(pout);
     m->peak_in = din > m->peak_in ? din : m->peak_in - fall;
     m->peak_out = dout > m->peak_out ? dout : m->peak_out - fall;
@@ -159,32 +278,6 @@ static void drain_meters(VfSession *s, Meters *m, float dt)
     } else if (!s->running) {
         m->vad = 0; m->gate = 1; m->gr = 0;
     }
-}
-
-/* Horizontal dB meter: -60..0 dBFS, green/yellow/red, with a peak-hold tick. */
-static void draw_level(Rectangle r, float db, float hold_db)
-{
-    DrawRectangleRec(r, (Color){ 30, 34, 40, 255 });
-    float t = (db + 60.0f) / 60.0f;
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    float y1 = (-18.0f + 60.0f) / 60.0f, y2 = (-6.0f + 60.0f) / 60.0f;
-    float w = r.width;
-    DrawRectangle((int)r.x, (int)r.y, (int)(w * fminf(t, y1)), (int)r.height, (Color){ 60, 190, 90, 255 });
-    if (t > y1) DrawRectangle((int)(r.x + w * y1), (int)r.y, (int)(w * (fminf(t, y2) - y1)), (int)r.height, (Color){ 220, 200, 60, 255 });
-    if (t > y2) DrawRectangle((int)(r.x + w * y2), (int)r.y, (int)(w * (t - y2)), (int)r.height, (Color){ 220, 70, 60, 255 });
-    float h = (hold_db + 60.0f) / 60.0f;
-    if (h > 0 && h <= 1) DrawRectangle((int)(r.x + w * h) - 1, (int)r.y, 2, (int)r.height, RAYWHITE);
-    for (int d = -48; d < 0; d += 12) {
-        int x = (int)(r.x + w * (d + 60.0f) / 60.0f);
-        DrawLine(x, (int)(r.y + r.height - 4), x, (int)(r.y + r.height), (Color){ 120, 120, 120, 255 });
-    }
-}
-
-static void draw_fill(Rectangle r, float t, Color c)
-{
-    DrawRectangleRec(r, (Color){ 30, 34, 40, 255 });
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    DrawRectangle((int)r.x, (int)r.y, (int)(r.width * t), (int)r.height, c);
 }
 
 static int find_name(const VfDeviceList *l, const char *name)
@@ -203,6 +296,7 @@ static unsigned long long settings_hash(const VfSession *s, const VfSettings *st
     MIX(a); MIX(b); MIX(c); MIX(d); MIX(st->start_processing); MIX(st->background);
     MIX(atomic_load(&((VfSession *)s)->pipe.bypass_all));
     for (const char *p = st->preset; *p; p++) MIX(*p);
+    for (const char *p = st->language; *p; p++) MIX(*p);
     for (int i = 0; i < s->pipe.count; i++) {
         MIX(atomic_load(&s->pipe.fx[i]->bypass));
         for (int j = 0; j < s->pipe.fx[i]->n_params; j++) {
@@ -222,7 +316,17 @@ static void build_preset_list(char *out, size_t cap, VfPresetInfo *list, int *n)
     size_t len = 0;
     out[0] = '\0';
     for (int i = 0; i < *n && len + 4 < cap; i++)
-        len += (size_t)snprintf(out + len, cap - len, "%s%s%s", i ? ";" : "", list[i].name, list[i].builtin ? "" : " *");
+        len += (size_t)snprintf(out + len, cap - len, "%s%s%s", i ? ";" : "",
+                                vf_preset_display_name(&list[i]), list[i].builtin ? "" : " *");
+}
+
+static void fill_device_names(VfSettings *st, const VfSession *s, int in, int out, int mon, int mode)
+{
+    snprintf(st->input, sizeof st->input, "%s", in < s->caps.count ? s->caps.dev[in].name : "");
+    snprintf(st->output, sizeof st->output, "%s", out < s->plays.count ? s->plays.dev[out].name : "");
+    snprintf(st->monitor, sizeof st->monitor, "%s", mon < s->plays.count ? s->plays.dev[mon].name : "");
+    st->mode = mode;
+    st->bypass = atomic_load(&((VfSession *)s)->pipe.bypass_all);
 }
 
 /* ------------------------------------------------------------------ main */
@@ -230,13 +334,14 @@ static void build_preset_list(char *out, size_t cap, VfPresetInfo *list, int *n)
 int main(int argc, char **argv)
 {
     int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0;
-    const char *in_file = NULL, *shot = NULL;
+    const char *in_file = NULL, *shot = NULL, *lang_arg = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--autostart")) autostart = 1;
         else if (!strcmp(argv[i], "--mode") && i + 1 < argc) mode = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--in-file") && i + 1 < argc) in_file = argv[++i];
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) frames_to_shot = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--lang") && i + 1 < argc) lang_arg = argv[++i];
         else if (!strcmp(argv[i], "--verbose")) verbose = 1;
         else if (!strcmp(argv[i], "--minimized")) minimized = 1;
     }
@@ -248,12 +353,14 @@ int main(int argc, char **argv)
     static VfSession s;
     int init_ok = vf_session_init(&s, 1) == 0;
 
-    /* settings.ini: devices by name, mode, effect parameters */
+    /* settings.ini: devices by name, mode, language, effect parameters */
     VfSettings st;
     vf_settings_defaults(&st);
     char settings_file[VF_PATH_MAX] = "";
     int have_settings_path = vf_settings_path(settings_file, sizeof settings_file) == 0;
     if (init_ok && have_settings_path) vf_settings_load(&st, &s.pipe, settings_file);
+    if (lang_arg) snprintf(st.language, sizeof st.language, "%s", lang_arg);
+    vf_i18n_set(vf_lang_from_code(st.language));
     int autostart_on = vf_autostart_get();
 
     float *file_buf = NULL;
@@ -261,7 +368,7 @@ int main(int argc, char **argv)
     if (in_file) file_buf = vf_wav_read_mono(in_file, VF_SAMPLE_RATE, &file_len);
 
     /* Background mode: closing the window hides it to the tray icon (Windows) or
-     * minimizes it (no tray available); audio keeps running until "Zakończ". */
+     * minimizes it (no tray available); audio keeps running until "Quit". */
     const int tray_ok = !shot && vf_tray_start() == 0;
     const int start_hidden = minimized && st.background && tray_ok;
 
@@ -274,14 +381,8 @@ int main(int argc, char **argv)
     SetExitKey(KEY_NULL);                         /* Esc must not quit */
     SetTargetFPS(60);
     if (minimized && !start_hidden) MinimizeWindow();
-    /* Order matters: GuiLoadStyleDefault() unloads the texture of a previously set
-     * custom font, so reset the style first and set our font afterwards. */
-    GuiLoadStyleDefault();
-    Font font = load_ui_font(36);
-    GuiSetFont(font);
-    GuiSetStyle(DEFAULT, TEXT_SIZE, 17);
-    GuiSetStyle(DEFAULT, TEXT_SPACING, 0);
-    GuiSetStyle(DEFAULT, BACKGROUND_COLOR, ColorToInt((Color){ 245, 246, 248, 255 }));
+    load_fonts();
+    apply_style();
 
     /* selections */
     int sel_in = init_ok ? vf_session_default_mic(&s) : 0;
@@ -297,6 +398,7 @@ int main(int argc, char **argv)
     if ((k = find_name(&s.plays, st.output)) >= 0) sel_out = k;
     if ((k = find_name(&s.plays, st.monitor)) >= 0) sel_mon = k;
     int sel_mode = mode >= 0 && mode <= 2 ? mode : (st.mode >= 0 && st.mode <= 2 ? st.mode : VF_OUT_VMIC);
+    int sel_lang = (int)vf_i18n_get();
     int edit_in = 0, edit_out = 0, edit_preset = 0, edit_name = 0;
     static char list_in[LIST_CHARS], list_out[LIST_CHARS], list_presets[LIST_CHARS];
     build_list(list_in, sizeof list_in, &s.caps);
@@ -317,7 +419,7 @@ int main(int argc, char **argv)
     unsigned long long saved_hash = settings_hash(&s, &st, sel_in, sel_out, sel_mon, sel_mode);
     double dirty_since = -1, retry_at = 0;
     int quit = 0, hidden = start_hidden, refresh_before_start = 0;
-    if (start_hidden) snprintf(note, sizeof note, "VoiceFilter działa w tle - ikona w zasobniku systemowym.");
+    if (start_hidden) snprintf(note, sizeof note, "%s", tr(S_N_IN_TRAY));
 
     while (!quit) {
         const float dt = GetFrameTime();
@@ -349,7 +451,7 @@ int main(int argc, char **argv)
             /* a device that vanished (unplugged, driver reset) stops the stream: restart it */
             if (s.running && ma_device_get_state(&s.eng.dev) != ma_device_state_started) {
                 vf_session_stop(&s);
-                snprintf(status, sizeof status, "Urządzenie audio przestało działać - ponawiam uruchomienie...");
+                snprintf(status, sizeof status, "%s", tr(S_N_DEVICE_LOST));
                 retry_at = GetTime() + 2.0;
                 refresh_before_start = 1;
             }
@@ -381,7 +483,7 @@ int main(int argc, char **argv)
                 if (vf_session_start(&s, &c) == 0) { status[0] = '\0'; refresh_before_start = 0; }
                 else {
                     /* keep trying (e.g. a USB headset that appears a few seconds after login) */
-                    snprintf(status, sizeof status, "%s - ponowna próba za 3 s", s.error);
+                    snprintf(status, sizeof status, tr(S_N_RETRY_FMT), s.error);
                     retry_at = GetTime() + 3.0;
                     refresh_before_start = 1;
                 }
@@ -400,13 +502,9 @@ int main(int argc, char **argv)
             if (h != saved_hash) {
                 if (dirty_since < 0) dirty_since = GetTime();
                 if (GetTime() - dirty_since > 1.0) {
-                    snprintf(st.input, sizeof st.input, "%s", sel_in < s.caps.count ? s.caps.dev[sel_in].name : "");
-                    snprintf(st.output, sizeof st.output, "%s", sel_out < s.plays.count ? s.plays.dev[sel_out].name : "");
-                    snprintf(st.monitor, sizeof st.monitor, "%s", sel_mon < s.plays.count ? s.plays.dev[sel_mon].name : "");
-                    st.mode = sel_mode;
-                    st.bypass = atomic_load(&s.pipe.bypass_all);
+                    fill_device_names(&st, &s, sel_in, sel_out, sel_mon, sel_mode);
                     if (vf_settings_save(&st, &s.pipe, settings_file) != 0)
-                        snprintf(status, sizeof status, "Nie udało się zapisać %s", settings_file);
+                        snprintf(status, sizeof status, tr(S_N_SAVE_SETTINGS_FAIL), settings_file);
                     saved_hash = h;
                     dirty_since = -1;
                 }
@@ -420,71 +518,93 @@ int main(int argc, char **argv)
         }
 
         BeginDrawing();
-        ClearBackground((Color){ 245, 246, 248, 255 });
+        background();
         if (edit_in || edit_out || edit_preset) GuiLock();
 
-        /* ---- header: devices and mode ---- */
-        GuiLabel((Rectangle){ 16, 14, 80, 28 }, "Mikrofon");
-        Rectangle r_in = { 96, 14, 400, 28 };
-        GuiLabel((Rectangle){ 516, 14, 60, 28 }, "Wyjście");
-        GuiToggleGroup((Rectangle){ 580, 14, 134, 28 }, "Słuchawki;Wirtualny mic;Mic + odsłuch", &sel_mode);
-        Rectangle r_out = { 96, 52, 400, 28 };
-        if (sel_mode == VF_OUT_HEADPHONES) {
-            GuiLabel((Rectangle){ 16, 52, 80, 28 }, "Głośniki");
-        } else if (sel_mode == VF_OUT_VMIC_MONITOR) {
-            GuiLabel((Rectangle){ 16, 52, 80, 28 }, "Odsłuch");
+        /* ---- header: logo, subtitle, language ---- */
+        glow_text(F.title, "VOICEFILTER", 18, 8, C_NEON);
+        const float logo_w = MeasureTextEx(F.title, "VOICEFILTER", (float)F.title.baseSize, 0).x;
+        text(F.lcd, "v1.0", 26 + logo_w, 12, C_TEXT_DIM);
+        text(F.ui, tr(S_SUBTITLE), 26 + logo_w, 26, C_TEXT);
+        {   /* blinking "power" LED */
+            const int on = s.running && ((int)(GetTime() * 2) % 2 || !atomic_load(&s.pipe.bypass_all));
+            DrawCircle(WIN_W - 128, 24, 6, on ? C_NEON : C_SEG_OFF);
+            if (on) DrawCircle(WIN_W - 128, 24, 12, (Color){ 57, 255, 20, 45 });
         }
-        char vm[160];
-        if (sel_mode != VF_OUT_HEADPHONES) {
-            snprintf(vm, sizeof vm, "W Discordzie / OBS wybierz mikrofon: \"%s\"", vf_session_vmic_name(&s));
-            GuiLabel((Rectangle){ 516, 52, 470, 28 }, vm);
+        int lang = sel_lang;
+        GuiToggleGroup((Rectangle){ WIN_W - 104, 12, 42, 24 }, "EN;PL", &lang);
+        if (lang != sel_lang) {
+            sel_lang = lang;
+            vf_i18n_set((VfLang)lang);
+            snprintf(st.language, sizeof st.language, "%s", vf_lang_code((VfLang)lang));
+            build_preset_list(list_presets, sizeof list_presets, presets, &n_presets);
+            build_list(list_in, sizeof list_in, &s.caps);
+            build_list(list_out, sizeof list_out, &s.plays);
+            note[0] = '\0';
         }
 
-        int bypass = atomic_load(&s.pipe.bypass_all);
-        bool byp = bypass != 0;
-        GuiToggle((Rectangle){ 1000, 52, 164, 28 }, byp ? "Filtr WYŁĄCZONY" : "Filtr włączony", &byp);
-        if ((int)byp != bypass) atomic_store(&s.pipe.bypass_all, byp ? 1 : 0);
-        if (GuiButton((Rectangle){ 1000, 14, 164, 28 }, s.running ? "#132# Stop" : "#131# Start")) {
+        /* ---- row 1: microphone, output mode, start/stop ---- */
+        const float r1 = HEADER_H + 12, r2 = r1 + 36, r3 = r2 + 36;
+        GuiLabel((Rectangle){ 16, r1, 92, 28 }, tr(S_MICROPHONE));
+        Rectangle r_in = { 110, r1, 400, 28 };
+        GuiLabel((Rectangle){ 526, r1, 70, 28 }, tr(S_OUTPUT));
+        GuiToggleGroup((Rectangle){ 596, r1, 134, 28 }, tr(S_MODES), &sel_mode);
+        if (GuiButton((Rectangle){ 1012, r1, 152, 28 }, s.running ? TextFormat("#132# %s", tr(S_STOP))
+                                                                   : TextFormat("#131# %s", tr(S_START)))) {
             want_running = !s.running;
             if (want_running) applied_in = -2;            /* force (re)start */
         }
 
-        /* ---- presets + app options ---- */
-        GuiLabel((Rectangle){ 16, 90, 80, 28 }, "Preset");
-        Rectangle r_preset = { 96, 90, 210, 28 };
-        if (GuiTextBox((Rectangle){ 316, 90, 160, 28 }, preset_name, sizeof preset_name - 1, edit_name)) edit_name = !edit_name;
-        if (GuiButton((Rectangle){ 482, 90, 110, 28 }, "Zapisz jako")) {
+        /* ---- row 2: second device / vmic hint, filter on/off ---- */
+        Rectangle r_out = { 110, r2, 400, 28 };
+        if (sel_mode == VF_OUT_HEADPHONES) GuiLabel((Rectangle){ 16, r2, 92, 28 }, tr(S_SPEAKERS));
+        else if (sel_mode == VF_OUT_VMIC_MONITOR) GuiLabel((Rectangle){ 16, r2, 92, 28 }, tr(S_MONITOR));
+        if (sel_mode != VF_OUT_HEADPHONES) {
+            char vm[200];
+            snprintf(vm, sizeof vm, tr(S_VMIC_HINT), vf_session_vmic_name(&s));
+            text(F.ui, vm, 526, r2 + 6, C_TEXT_DIM);
+        }
+        int bypass = atomic_load(&s.pipe.bypass_all);
+        bool byp = bypass != 0;
+        GuiToggle((Rectangle){ 1012, r2, 152, 28 }, byp ? tr(S_FILTER_OFF) : tr(S_FILTER_ON), &byp);
+        if ((int)byp != bypass) atomic_store(&s.pipe.bypass_all, byp ? 1 : 0);
+
+        /* ---- row 3: presets + app options ---- */
+        GuiLabel((Rectangle){ 16, r3, 92, 28 }, tr(S_PRESET));
+        Rectangle r_preset = { 110, r3, 200, 28 };
+        if (GuiTextBox((Rectangle){ 318, r3, 150, 28 }, preset_name, sizeof preset_name - 1, edit_name)) edit_name = !edit_name;
+        if (GuiButton((Rectangle){ 474, r3, 100, 28 }, tr(S_SAVE_AS))) {
             char safe[64];
             if (vf_preset_sanitize(preset_name, safe, sizeof safe) != 0)
-                snprintf(note, sizeof note, "Wpisz nazwę presetu w polu obok.");
+                snprintf(note, sizeof note, "%s", tr(S_N_NAME_MISSING));
             else if (vf_preset_is_builtin(safe))
-                snprintf(note, sizeof note, "\"%s\" to preset wbudowany - wybierz inną nazwę.", safe);
+                snprintf(note, sizeof note, tr(S_N_BUILTIN_NAME), safe);
             else if (vf_preset_save(&s.pipe, safe) != 0)
-                snprintf(note, sizeof note, "Nie udało się zapisać presetu.");
+                snprintf(note, sizeof note, "%s", tr(S_N_SAVE_FAILED));
             else {
                 build_preset_list(list_presets, sizeof list_presets, presets, &n_presets);
                 for (int i = 0; i < n_presets; i++) if (!strcmp(presets[i].name, safe)) sel_preset = shown_preset = i;
                 snprintf(st.preset, sizeof st.preset, "%s", safe);
-                snprintf(note, sizeof note, "Zapisano preset \"%s\".", safe);
+                snprintf(note, sizeof note, tr(S_N_SAVED), safe);
                 preset_name[0] = '\0';
                 edit_name = 0;
             }
         }
         const int user_preset = sel_preset < n_presets && !presets[sel_preset].builtin;
         if (!user_preset) GuiDisable();
-        if (GuiButton((Rectangle){ 598, 90, 70, 28 }, "Usuń") && user_preset) {
+        if (GuiButton((Rectangle){ 580, r3, 72, 28 }, tr(S_DELETE)) && user_preset) {
             char gone[64];
             snprintf(gone, sizeof gone, "%s", presets[sel_preset].name);
             if (vf_preset_delete(gone) == 0) {
                 build_preset_list(list_presets, sizeof list_presets, presets, &n_presets);
                 sel_preset = shown_preset = 0;
                 snprintf(st.preset, sizeof st.preset, "%s", presets[0].name);
-                snprintf(note, sizeof note, "Usunięto preset \"%s\".", gone);
+                snprintf(note, sizeof note, tr(S_N_DELETED), gone);
             }
         }
         GuiEnable();
         bool as = autostart_on != 0;
-        GuiCheckBox((Rectangle){ 684, 95, 18, 18 }, "Start z systemem", &as);
+        GuiCheckBox((Rectangle){ 676, r3 + 5, 18, 18 }, tr(S_START_WITH_SYSTEM), &as);
         if ((int)as != autostart_on) {
             if (vf_autostart_set(as) == 0) {
                 autostart_on = as;
@@ -492,105 +612,120 @@ int main(int argc, char **argv)
                     /* starting with the system only makes sense if it then filters in the background */
                     st.start_processing = 1;
                     st.background = 1;
-                    snprintf(note, sizeof note, "Po zalogowaniu VoiceFilter wystartuje w tle i od razu zacznie filtrować.");
-                } else snprintf(note, sizeof note, "Autostart wyłączony.");
-            } else snprintf(status, sizeof status, "Nie udało się zmienić autostartu.");
+                    snprintf(note, sizeof note, "%s", tr(S_N_AUTOSTART_ON));
+                } else snprintf(note, sizeof note, "%s", tr(S_N_AUTOSTART_OFF));
+            } else snprintf(status, sizeof status, "%s", tr(S_N_AUTOSTART_FAIL));
         }
         bool sp = st.start_processing != 0;
-        GuiCheckBox((Rectangle){ 846, 95, 18, 18 }, "Filtruj po starcie", &sp);
+        GuiCheckBox((Rectangle){ 846, r3 + 5, 18, 18 }, tr(S_FILTER_ON_LAUNCH), &sp);
         st.start_processing = sp;
         bool bg = st.background != 0;
-        GuiCheckBox((Rectangle){ 1012, 95, 18, 18 }, "Działaj w tle", &bg);
+        GuiCheckBox((Rectangle){ 1012, r3 + 5, 18, 18 }, tr(S_RUN_IN_BACKGROUND), &bg);
         if ((int)bg != st.background) {
             st.background = bg;
-            snprintf(note, sizeof note, bg ? (tray_ok ? "Zamknięcie okna schowa VoiceFilter do zasobnika - filtr działa dalej."
-                                                      : "Zamknięcie okna zminimalizuje VoiceFilter - filtr działa dalej.")
-                                           : "Zamknięcie okna zakończy VoiceFilter.");
+            snprintf(note, sizeof note, "%s", tr(bg ? (tray_ok ? S_N_BG_TRAY : S_N_BG_MIN) : S_N_BG_OFF));
         }
 
         /* ---- meters ---- */
-        GuiGroupBox((Rectangle){ 16, TOP, 250, 586 }, "Poziomy");
-        int y = TOP + 18;
-        char t[96];
-        GuiLabel((Rectangle){ 28, y, 220, 20 }, "Wejście"); y += 22;
-        draw_level((Rectangle){ 28, y, 226, 16 }, m.peak_in, m.hold_in);
-        snprintf(t, sizeof t, "%.1f dBFS", (double)(m.hold_in < -99 ? -99 : m.hold_in));
-        GuiLabel((Rectangle){ 28, y + 18, 226, 20 }, t); y += 52;
-        GuiLabel((Rectangle){ 28, y, 220, 20 }, "Wyjście"); y += 22;
-        draw_level((Rectangle){ 28, y, 226, 16 }, m.peak_out, m.hold_out);
-        snprintf(t, sizeof t, "%.1f dBFS", (double)(m.hold_out < -99 ? -99 : m.hold_out));
-        GuiLabel((Rectangle){ 28, y + 18, 226, 20 }, t); y += 60;
+        Rectangle mb = { 16, TOP, 250, 586 };
+        panel(mb, tr(S_LEVELS), -1);
+        float y = TOP + 40;
+        const float mx = 30, mw = 222;
+        char t[128];
+        text(F.ui, tr(S_INPUT), mx, y, C_TEXT);
+        snprintf(t, sizeof t, "%6.1f dB", (double)(m.hold_in < -99 ? -99 : m.hold_in));
+        text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, C_NEON);
+        y += 22;
+        led_meter((Rectangle){ mx, y, mw, 20 }, m.peak_in, m.hold_in); y += 36;
 
-        /* VAD with the gate threshold marker */
+        text(F.ui, tr(S_OUTPUT_LEVEL), mx, y, C_TEXT);
+        snprintf(t, sizeof t, "%6.1f dB", (double)(m.hold_out < -99 ? -99 : m.hold_out));
+        text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, C_NEON);
+        y += 22;
+        led_meter((Rectangle){ mx, y, mw, 20 }, m.peak_out, m.hold_out); y += 44;
+
+        /* VAD with the gate threshold marker and a "voice" lamp */
         const int gi = pipeline_find_fx(&s.pipe, "gate");
         const float thr = gi >= 0 ? pipeline_get_param(&s.pipe, gi, 0) : 0.5f;
-        const int voice = m.vad >= thr;
-        GuiLabel((Rectangle){ 28, y, 220, 20 }, "Aktywność głosu (VAD)"); y += 22;
-        draw_fill((Rectangle){ 28, y, 190, 16 }, m.vad, voice ? (Color){ 60, 190, 90, 255 } : (Color){ 130, 140, 150, 255 });
-        DrawRectangle((int)(28 + 190 * thr) - 1, y - 2, 2, 20, (Color){ 230, 120, 40, 255 });
-        DrawCircle(240, y + 8, 9, voice ? (Color){ 60, 200, 90, 255 } : (Color){ 200, 205, 210, 255 });
-        snprintf(t, sizeof t, "%d %%  (próg %d %%)", (int)(m.vad * 100 + 0.5f), (int)(thr * 100 + 0.5f));
-        GuiLabel((Rectangle){ 28, y + 18, 226, 20 }, t); y += 52;
+        const int voice = s.running && m.vad >= thr;
+        text(F.ui, tr(S_VAD), mx, y, C_TEXT); y += 22;
+        led_bar((Rectangle){ mx, y, mw - 30, 18 }, m.vad, voice ? C_NEON : (Color){ 90, 150, 80, 255 });
+        DrawRectangle((int)(mx + (mw - 30) * thr) - 1, (int)y - 3, 2, 24, C_AMBER);
+        DrawCircle((int)(mx + mw - 10), (int)y + 9, 8, voice ? C_NEON : C_SEG_OFF);
+        if (voice) DrawCircle((int)(mx + mw - 10), (int)y + 9, 14, (Color){ 57, 255, 20, 50 });
+        snprintf(t, sizeof t, tr(S_VAD_FMT), (int)(m.vad * 100 + 0.5f), (int)(thr * 100 + 0.5f));
+        text(F.lcd, t, mx, y + 24, C_TEXT_DIM); y += 56;
 
-        GuiLabel((Rectangle){ 28, y, 220, 20 }, "Bramka - otwarcie"); y += 22;
-        draw_fill((Rectangle){ 28, y, 226, 16 }, m.gate, (Color){ 80, 140, 220, 255 });
-        snprintf(t, sizeof t, "%d %%", (int)(m.gate * 100 + 0.5f));
-        GuiLabel((Rectangle){ 28, y + 18, 226, 20 }, t); y += 52;
+        text(F.ui, tr(S_GATE_OPEN), mx, y, C_TEXT);
+        snprintf(t, sizeof t, "%3d %%", (int)(m.gate * 100 + 0.5f));
+        text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, C_NEON);
+        y += 22;
+        led_bar((Rectangle){ mx, y, mw, 18 }, m.gate, (Color){ 80, 220, 160, 255 }); y += 40;
 
-        GuiLabel((Rectangle){ 28, y, 220, 20 }, "Kompresja"); y += 22;
-        draw_fill((Rectangle){ 28, y, 226, 16 }, -m.gr / 24.0f, (Color){ 200, 110, 60, 255 });
-        snprintf(t, sizeof t, "%.1f dB", (double)m.gr);
-        GuiLabel((Rectangle){ 28, y + 18, 226, 20 }, t); y += 60;
+        text(F.ui, tr(S_COMPRESSION), mx, y, C_TEXT);
+        snprintf(t, sizeof t, "%5.1f dB", (double)m.gr);
+        text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, C_AMBER);
+        y += 22;
+        led_bar((Rectangle){ mx, y, mw, 18 }, -m.gr / 24.0f, C_AMBER); y += 46;
 
-        GuiLabel((Rectangle){ 28, y, 226, 20 }, "Opóźnienie (szacunek)"); y += 22;
+        /* latency readout in an LCD window */
+        text(F.ui, tr(S_LATENCY), mx, y, C_TEXT); y += 22;
+        Rectangle lr = { mx, y, mw, 78 };
+        lcd(lr);
         if (s.running) {
             EngineLatency l;
             engine_latency(&s.eng, &l);
             const double sink_ms = 1000.0 * VF_SINK_TARGET / VF_SAMPLE_RATE;
             const double total = s.use_pw ? l.capture_ms + l.dsp_ms + sink_ms : l.total_ms;
             snprintf(t, sizeof t, "~%.0f ms%s", total,
-                     s.use_pw ? " + PipeWire" : sel_mode != VF_OUT_HEADPHONES ? " + VB-Cable" : "");
-            DrawTextEx(font, t, (Vector2){ 28, (float)y }, 17, 0, DARKGRAY); y += 20;
-            if (s.use_pw) snprintf(t, sizeof t, "wej. %.0f + DSP %.1f + bufor %.0f ms", l.capture_ms, l.dsp_ms, sink_ms);
-            else snprintf(t, sizeof t, "wej. %.0f + wyj. %.0f + FIFO %.0f + DSP %.1f ms",
-                          l.capture_ms, l.playback_ms, l.fifo_ms, l.dsp_ms);
-            DrawTextEx(font, t, (Vector2){ 28, (float)y }, 14, 0, GRAY); y += 30;
+                     s.use_pw ? " +PW" : sel_mode != VF_OUT_HEADPHONES ? " +CABLE" : "");
+            glow_text(F.lcd_big, t, lr.x + 8, lr.y + 8, C_NEON);
+            if (s.use_pw) snprintf(t, sizeof t, tr(S_LAT_PW_FMT), l.capture_ms, l.dsp_ms, sink_ms);
+            else snprintf(t, sizeof t, tr(S_LAT_FMT), l.capture_ms, l.playback_ms, l.fifo_ms, l.dsp_ms);
+            SetTextLineSpacing(4);                    /* raylib: extra pixels between lines */
+            DrawTextEx(F.lcd, t, (Vector2){ lr.x + 8, lr.y + 38 }, (float)F.lcd.baseSize, 0, C_TEXT_DIM);
         } else {
-            DrawTextEx(font, "-", (Vector2){ 28, (float)y }, 17, 0, DARKGRAY); y += 50;
+            glow_text(F.lcd_big, "-- ms", lr.x + 8, lr.y + 8, C_TEXT_DIM);
         }
-        snprintf(t, sizeof t, "Przerwy w dźwięku: %u", vf_session_xruns(&s));
-        GuiLabel((Rectangle){ 28, y, 226, 20 }, t);
+        y += 90;
+        snprintf(t, sizeof t, tr(S_DROPOUTS_FMT), vf_session_xruns(&s));
+        text(F.lcd, t, mx, y, vf_session_xruns(&s) ? C_AMBER : C_TEXT_DIM);
 
         /* ---- effect panels: 3 columns x 2 rows, built from the parameter tables ---- */
         for (int i = 0; i < s.pipe.count; i++) {
             Fx *fx = s.pipe.fx[i];
             const float pw = 292, ph = 290;
             Rectangle box = { 282 + (i % 3) * (pw + 6), TOP + (i / 3) * (ph + 6), pw, ph };
-            GuiGroupBox(box, fx_title(fx->name));
             bool on = !atomic_load(&fx->bypass);
-            GuiCheckBox((Rectangle){ box.x + 12, box.y + 16, 18, 18 }, "włączony", &on);
+            panel(box, tr_fx(fx->name), on && !atomic_load(&s.pipe.bypass_all) && s.running);
+            GuiToggle((Rectangle){ box.x + box.width - 128, box.y + 6, 44, 20 }, on ? "ON" : "OFF", &on);
             if (on == (bool)atomic_load(&fx->bypass)) pipeline_set_bypass(&s.pipe, i, !on);
-            if (GuiButton((Rectangle){ box.x + box.width - 92, box.y + 12, 80, 24 }, "Domyślne"))
+            GuiSetStyle(DEFAULT, TEXT_SIZE, 14);
+            GuiSetFont(F.bold);
+            if (GuiButton((Rectangle){ box.x + box.width - 80, box.y + 6, 72, 20 }, tr(S_DEFAULTS)))
                 for (int j = 0; j < fx->n_params; j++) pipeline_set_param(&s.pipe, i, j, fx->params[j].def);
+            GuiSetFont(F.ui);
+            GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
             if (!on) GuiDisable();
-            float py = box.y + 48;
+            float py = box.y + 38;
             for (int j = 0; j < fx->n_params; j++) {
                 const FxParamInfo *pi = &fx->params[j];
                 float v = pipeline_get_param(&s.pipe, i, j);
                 if (pi->toggle) {
                     bool b = v >= 0.5f;
-                    GuiCheckBox((Rectangle){ box.x + 12, py + 4, 18, 18 }, param_label(fx->name, pi->name), &b);
+                    GuiCheckBox((Rectangle){ box.x + 14, py + 4, 18, 18 }, tr_param(fx->name, pi->name), &b);
                     if (b != (v >= 0.5f)) pipeline_set_param(&s.pipe, i, j, b ? 1.0f : 0.0f);
                     py += 34;
                     continue;
                 }
-                GuiLabel((Rectangle){ box.x + 12, py, 170, 18 }, param_label(fx->name, pi->name));
+                text(F.ui, tr_param(fx->name, pi->name), box.x + 14, py, on ? C_TEXT : (Color){ 47, 74, 43, 255 });
                 char val[48];
                 const int ints = pi->max - pi->min >= 50.0f;
                 snprintf(val, sizeof val, ints ? "%.0f %s" : "%.2f %s", (double)v, pi->unit);
-                GuiLabel((Rectangle){ box.x + 180, py, 100, 18 }, val);
+                const float vw = MeasureTextEx(F.lcd, val, 14, 0).x;
+                text(F.lcd, val, box.x + box.width - 14 - vw, py + 2, on ? C_NEON : (Color){ 47, 74, 43, 255 });
                 float nv = v;
-                GuiSliderBar((Rectangle){ box.x + 12, py + 19, box.width - 24, 10 }, NULL, NULL, &nv, pi->min, pi->max);
+                GuiSliderBar((Rectangle){ box.x + 14, py + 19, box.width - 28, 10 }, NULL, NULL, &nv, pi->min, pi->max);
                 if (nv != v) {
                     if (ints) nv = roundf(nv);
                     pipeline_set_param(&s.pipe, i, j, nv);
@@ -600,14 +735,23 @@ int main(int argc, char **argv)
             GuiEnable();
         }
 
-        /* ---- status bar ---- */
+        /* ---- status bar: LCD strip ---- */
         char sb[600];
-        if (status[0]) snprintf(sb, sizeof sb, "Błąd: %s", status);
-        else if (s.running) snprintf(sb, sizeof sb, "Działa - %s%s%s%s", s.use_pw ? "PipeWire" : ma_get_backend_name(s.ctx.backend),
-                                     file_buf ? " (źródło: plik testowy)" : "", note[0] ? "   |   " : "", note);
-        else snprintf(sb, sizeof sb, "Zatrzymane - wybierz urządzenia i naciśnij Start%s%s", note[0] ? "   |   " : "", note);
-        GuiStatusBar((Rectangle){ 0, WIN_H - 26, WIN_W, 26 }, sb);
-        if (status[0]) DrawRectangle(0, WIN_H - 26, 4, 26, RED);
+        if (status[0]) snprintf(sb, sizeof sb, tr(S_ST_ERROR), status);
+        else if (s.running) {
+            char run[160];
+            snprintf(run, sizeof run, tr(S_ST_RUNNING), s.use_pw ? "PipeWire" : ma_get_backend_name(s.ctx.backend));
+            snprintf(sb, sizeof sb, "%s%s%s%s", run, file_buf ? tr(S_ST_TESTFILE) : "", note[0] ? "   |   " : "", note);
+        } else snprintf(sb, sizeof sb, "%s%s%s", tr(S_ST_STOPPED), note[0] ? "   |   " : "", note);
+        Rectangle sr = { 0, WIN_H - 26, WIN_W, 26 };
+        lcd(sr);
+        DrawRectangle(0, WIN_H - 27, WIN_W, 1, C_NEON);
+        text(F.lcd, "> ", 10, sr.y + 6, C_NEON);
+        text(F.lcd, sb, 30, sr.y + 6, status[0] ? C_RED : C_TEXT);
+        if ((int)(GetTime() * 2) % 2) {                       /* blinking block cursor */
+            const float cw = MeasureTextEx(F.lcd, sb, 14, 0).x;
+            DrawRectangle((int)(34 + cw), (int)sr.y + 6, 8, 14, status[0] ? C_RED : C_NEON);
+        }
 
         /* ---- dropdowns last, so their open lists cover the rest ---- */
         GuiUnlock();
@@ -622,8 +766,8 @@ int main(int argc, char **argv)
         if (!edit_preset && sel_preset != shown_preset && sel_preset < n_presets) {
             if (vf_preset_apply(&s.pipe, presets[sel_preset].name) == 0) {
                 snprintf(st.preset, sizeof st.preset, "%s", presets[sel_preset].name);
-                snprintf(note, sizeof note, "Wczytano preset \"%s\".", presets[sel_preset].name);
-            } else snprintf(status, sizeof status, "Nie udało się wczytać presetu.");
+                snprintf(note, sizeof note, tr(S_N_LOADED), vf_preset_display_name(&presets[sel_preset]));
+            } else snprintf(status, sizeof status, "%s", tr(S_N_LOAD_FAILED));
             shown_preset = sel_preset;
         }
 
@@ -637,16 +781,12 @@ int main(int argc, char **argv)
 
     /* final save (also catches changes made within the last second) */
     if (init_ok && have_settings_path && !shot) {
-        snprintf(st.input, sizeof st.input, "%s", sel_in < s.caps.count ? s.caps.dev[sel_in].name : "");
-        snprintf(st.output, sizeof st.output, "%s", sel_out < s.plays.count ? s.plays.dev[sel_out].name : "");
-        snprintf(st.monitor, sizeof st.monitor, "%s", sel_mon < s.plays.count ? s.plays.dev[sel_mon].name : "");
-        st.mode = sel_mode;
-        st.bypass = atomic_load(&s.pipe.bypass_all);
+        fill_device_names(&st, &s, sel_in, sel_out, sel_mon, sel_mode);
         vf_settings_save(&st, &s.pipe, settings_file);
     }
     vf_tray_stop();
     vf_session_free(&s);
-    UnloadFont(font);
+    unload_fonts();
     CloseWindow();
     free(file_buf);
     return 0;

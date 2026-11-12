@@ -32,7 +32,8 @@ Opcje CMake: `-DVF_GUI=OFF` (bez GUI), `-DVF_PIPEWIRE=OFF` (Linux bez wirtualneg
 
 ## Użycie
 
-- `build/voicefilter` — GUI: urządzenia, tryb wyjścia, suwaki efektów, wskaźniki, presety, autostart.
+- `build/voicefilter` — GUI (domyślnie po angielsku, przełącznik EN/PL w prawym górnym rogu): urządzenia,
+  tryb wyjścia, suwaki efektów, wskaźniki, presety, autostart.
   Ustawienia zapisują się same (`%APPDATA%\VoiceFilter\settings.ini`, `~/.config/voicefilter/settings.ini`),
   presety użytkownika w podkatalogu `presets/`.
 - **Praca w tle:** zaznacz „Start z systemem” — po zalogowaniu VoiceFilter uruchomi się schowany w zasobniku

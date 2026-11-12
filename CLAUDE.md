@@ -120,6 +120,16 @@ RNNoise has no upstream CMake: built by our own target using the portable (non-x
    (Linux: flock on <config>/voicefilter.lock); a second launch posts WM_APP+2 to the tray window -> first instance
    shows its window, second exits 0. Robustness: if the stream stops (device unplugged) or start fails (USB headset
    late after login), the GUI re-enumerates devices, finds them by name and retries every 2-3 s while running is wanted.
+7. [done] UI languages + retro look. `src/app/i18n.c`: `tr(S_...)`, `tr_fx()`, `tr_param()`; English is the default,
+   Polish second (`[app] language = en|pl`, header EN/PL toggle, `--lang`). Every new UI string goes into the
+   `k_str` table in BOTH languages (ctest checks none is empty). Built-in presets have stable keys
+   (default/noisy/podcast/natural) stored in settings; display names come from `vf_preset_display_name()`;
+   old Polish names still map to the keys. Tray menu/tooltip follow the language.
+   Look ("2000s, green"): dark chassis + neon green, Win2000-style bevelled panels with gradient title strips and
+   status LEDs, segmented LED meters, LCD windows with scanlines (Lucida Console), Tahoma UI font, blinking
+   cursor status line. Theme colours/fonts are at the top of `main_gui.c` (`C_*`, `load_fonts`, `apply_style`).
+   Screenshot checks: use a VF_CONFIG_DIR with `start_processing = 0` plus `--in-file`, otherwise the real mic
+   is opened (and in monitor mode played to the speakers).
    Live test (Windows): scratchpad-style script with VF_CONFIG_DIR, `--minimized --in-file`, vf-record on CABLE,
    PostMessage WM_CLOSE to the GLFW window; note PowerShell turns $null into "" for P/Invoke strings -
    use [NullString]::Value with FindWindowW.

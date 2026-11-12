@@ -20,7 +20,8 @@ typedef struct VfSettings {
     int  bypass;
     int  start_processing;
     int  background;           /* closing the window keeps VoiceFilter running (tray) */
-    char preset[64];
+    char preset[64];           /* built-in key ("default", "podcast"...) or user preset name */
+    char language[8];          /* "en" (default) or "pl" */
 } VfSettings;
 
 void vf_settings_defaults(VfSettings *s);
@@ -38,7 +39,9 @@ void vf_fx_reset(Pipeline *p);                         /* defaults, all effects 
 #define VF_MAX_PRESETS 64
 typedef struct VfPresetInfo { char name[64]; int builtin; } VfPresetInfo;
 
-int  vf_presets_list(VfPresetInfo *out, int max);      /* built-ins first, then user files (sorted) */
+int  vf_presets_list(VfPresetInfo *out, int max);      /* built-ins (name = key) first, then user files */
+const char *vf_preset_display_name(const VfPresetInfo *p);   /* built-ins in the UI language */
+const char *vf_preset_key(const char *name);           /* any built-in name -> its key; others unchanged */
 int  vf_preset_apply(Pipeline *p, const char *name);   /* resets to defaults first; 0 = ok */
 int  vf_preset_save(const Pipeline *p, const char *name);     /* user preset; refuses built-in names */
 int  vf_preset_delete(const char *name);                       /* user presets only */
