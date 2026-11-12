@@ -133,7 +133,10 @@ void engine_device_config(ma_device_config *cfg, ma_device_type type, const Engi
     cfg->playback.format = ma_format_f32;
     cfg->playback.channels = 1;
     /* experimental knobs, off by default */
-    if (c->no_fixed_callback) cfg->noFixedSizedCallback = MA_TRUE;
+    /* variable-size callbacks: the engine re-chunks anyway, and miniaudio then skips its
+     * fixed-size intermediary buffers (~5 ms, L1 measurement in CLAUDE.md) */
+    cfg->noFixedSizedCallback = c->fixed_callback ? MA_FALSE : MA_TRUE;
+    cfg->noPreSilencedOutputBuffer = MA_TRUE;   /* the callback writes every output sample */
     if (c->pro_audio) cfg->wasapi.usage = ma_wasapi_usage_pro_audio;
     if (c->periods > 0) cfg->periods = (ma_uint32)c->periods;
 }
@@ -154,6 +157,16 @@ int engine_init(Engine *e, ma_context *ctx, Pipeline *pipe, const EngineConfig *
 
     if (ma_device_init(ctx, &cfg, &e->dev) != MA_SUCCESS) return -1;
     e->device_ready = 1;
+    /* the mixer rate the device really runs at (WASAPI shared: GetMixFormat = first native
+     * format). miniaudio asks Windows to convert, so internalSampleRate always reads 48000. */
+    ma_device_info info;
+    const int wasapi = ctx && ctx->backend == ma_backend_wasapi;   /* elsewhere format 0 is not the mixer */
+    if (wasapi && type != ma_device_type_playback && ma_device_get_info(&e->dev, ma_device_type_capture, &info) == MA_SUCCESS &&
+        info.nativeDataFormatCount > 0)
+        e->cap_mix_rate = info.nativeDataFormats[0].sampleRate;
+    if (wasapi && type != ma_device_type_capture && ma_device_get_info(&e->dev, ma_device_type_playback, &info) == MA_SUCCESS &&
+        info.nativeDataFormatCount > 0)
+        e->play_mix_rate = info.nativeDataFormats[0].sampleRate;
     return 0;
 }
 
@@ -221,6 +234,8 @@ void engine_latency(const Engine *e, EngineLatency *out)
     out->fifo_max = atomic_load_explicit(&e->fifo_max, memory_order_relaxed);
     if (out->fifo_min == INT_MAX) out->fifo_min = 0;
     out->prime = e->prime_samples;
+    out->cap_mix_rate = has_cap ? e->cap_mix_rate : 0;
+    out->play_mix_rate = has_play ? e->play_mix_rate : 0;
 
     if (out->cap_rate) out->capture_ms = 1000.0 * out->cap_period / out->cap_rate;
     if (out->play_rate) {
@@ -240,15 +255,15 @@ void engine_latency_report(const Engine *e, char *buf, int size)
     engine_latency(e, &l);
     const size_t n = (size_t)(size > 0 ? size : 0);
     snprintf(buf, n,
-             "  capture : period %u x %u, buffer %u frames @ %u Hz -> ~%.1f ms%s\n"
-             "  playback: period %u x %u, buffer %u frames @ %u Hz -> ~%.1f ms%s\n"
+             "  capture : period %u x %u, buffer %u frames, mixer %u Hz -> ~%.1f ms%s\n"
+             "  playback: period %u x %u, buffer %u frames, mixer %u Hz -> ~%.1f ms%s\n"
              "  miniaudio fixed-size callback buffers: capture %u, playback %u frames -> ~%.1f ms\n"
              "  callback blocks %u..%u (last %u) frames, FIFO fill %d..%d (pre-fill %d) -> ~%.1f ms\n"
              "  DSP %.1f ms  =>  total ~%.1f ms%s\n",
-             l.cap_period, l.cap_periods, l.cap_buffer, l.cap_rate, l.capture_ms,
-             l.cap_rate && l.cap_rate != VF_SAMPLE_RATE ? "  (device not at 48 kHz: resampling)" : "",
-             l.play_period, l.play_periods, l.play_buffer, l.play_rate, l.playback_ms,
-             l.play_rate && l.play_rate != VF_SAMPLE_RATE ? "  (device not at 48 kHz: resampling)" : "",
+             l.cap_period, l.cap_periods, l.cap_buffer, l.cap_mix_rate, l.capture_ms,
+             l.cap_mix_rate && l.cap_mix_rate != VF_SAMPLE_RATE ? "  (not 48 kHz: Windows resamples)" : "",
+             l.play_period, l.play_periods, l.play_buffer, l.play_mix_rate, l.playback_ms,
+             l.play_mix_rate && l.play_mix_rate != VF_SAMPLE_RATE ? "  (not 48 kHz: Windows resamples)" : "",
              l.cap_interm, l.play_interm, l.interm_ms,
              l.blk_min, l.blk_max, l.blk_last, l.fifo_min, l.fifo_max, l.prime, l.fifo_ms,
              l.dsp_ms, l.total_ms, l.wasapi ? "  (buffers from WASAPI GetBufferSize)" : "");

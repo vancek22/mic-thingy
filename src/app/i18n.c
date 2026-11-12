@@ -63,6 +63,8 @@ static const char *const k_str[S_COUNT][VF_LANG_COUNT] = {
                               "mic thingy działa w tle - ikona w zasobniku systemowym." },
     [S_N_SAVE_SETTINGS_FAIL] = { "Could not save %s", "Nie udało się zapisać %s" },
     [S_N_DEVICE_LOST]     = { "Audio device stopped - restarting...", "Urządzenie audio przestało działać - ponawiam uruchomienie..." },
+    [S_N_RESAMPLE_FMT]    = { "Device runs at %u Hz, not 48000: Windows resamples (more latency). Set 48000 Hz in Sound settings.",
+                              "Urządzenie działa z %u Hz, nie 48000: Windows przelicza próbki (większe opóźnienie). Ustaw 48000 Hz w ustawieniach dźwięku." },
     [S_N_RETRY_FMT]       = { "%s - retrying in 3 s", "%s - ponowna próba za 3 s" },
     [S_TRAY_SHOW]         = { "Show window", "Pokaż okno" },
     [S_TRAY_PROCESSING]   = { "Audio processing", "Przetwarzanie dźwięku" },

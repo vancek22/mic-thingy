@@ -76,13 +76,13 @@ static void usage(void)
            "  --preset NAME apply a preset (built-in: Domyślny, Głośne otoczenie, Podcast, Naturalny)\n"
            "  --no-config   ignore the effect settings saved by the GUI (settings.ini)\n"
            "  --latency-report  print the full buffer breakdown at start and every 5 s\n"
-           "  experimental (latency A/B tests): --periods M  --no-fixed  --pro-audio\n");
+           "  experimental (latency A/B tests): --periods M  --fixed  --pro-audio\n");
 }
 
 int main(int argc, char **argv)
 {
     int pre_in = -1, pre_out = -1, pre_mon = -1, period = 0, mode = -1, ncmd = 0, no_config = 0;
-    int periods = 0, no_fixed = 0, pro_audio = 0, lat_report = 0;
+    int periods = 0, fixed = 0, pro_audio = 0, lat_report = 0;
     double seconds = 0;
     const char *in_file = NULL, *cmds[MAX_CMDS], *preset = NULL;
     for (int i = 1; i < argc; i++) {
@@ -93,7 +93,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--monitor") && more) { pre_mon = atoi(argv[++i]); mode = VF_OUT_VMIC_MONITOR; }
         else if (!strcmp(argv[i], "--period") && more) period = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--periods") && more) periods = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--no-fixed")) no_fixed = 1;
+        else if (!strcmp(argv[i], "--fixed")) fixed = 1;
         else if (!strcmp(argv[i], "--pro-audio")) pro_audio = 1;
         else if (!strcmp(argv[i], "--latency-report")) lat_report = 1;
         else if (!strcmp(argv[i], "--in-file") && more) in_file = argv[++i];
@@ -133,7 +133,7 @@ int main(int argc, char **argv)
     memset(&c, 0, sizeof c);
     c.period = period;
     c.periods = periods;
-    c.no_fixed_callback = no_fixed;
+    c.fixed_callback = fixed;
     c.pro_audio = pro_audio;
     c.capture = -1;
     float *file_buf = NULL;

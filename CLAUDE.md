@@ -59,8 +59,22 @@ Linux: `sudo apt install build-essential cmake ninja-build libpipewire-0.3-dev l
    miniaudio's fixed-size callback buffers (`intermediaryBufferCap`), callback block min/max and the FIFO fill
    (relaxed atomics in `engine_process_block`). `mic-thingy-cli --latency-report` prints it; `vf-latency` builds its
    device with `engine_device_config()` (same as the engine) and prints "ours vs cable + OS". Experimental knobs
-   (`EngineConfig` / CLI / vf-latency): `--no-fixed` (noFixedSizedCallback), `--pro-audio` (MMCSS), `--periods M`.
-   Defaults unchanged. Measured, 6 alternating runs x 6 configs, median RTT (min..max):
+   (`EngineConfig` / CLI / vf-latency): `--fixed` (old fixed-size callbacks), `--pro-audio` (MMCSS), `--periods M`.
+   L1 (2026-11-12): variable-size callbacks (`noFixedSizedCallback`) + `noPreSilencedOutputBuffer` are now the
+   DEFAULT for the engine and the monitor device: the 2 x 240-frame miniaudio intermediaries are gone (~5 ms;
+   A/B over 12 alternating runs each: ~75 vs ~80 ms median). Measured and dropped: `--periods 1` (WASAPI keeps the
+   same 528/1056-frame buffers), period 128 / 480 (480 doubles the playback buffer), pro-audio (all within the
+   +-8 ms spread). Not tried, by reasoning: adaptive FIFO priming (measured: WASAPI duplex still calls back with
+   240-frame blocks, so 240 FIFO samples are unavoidable with 480-sample frames); separate capture + playback
+   devices for vmic (would add a VfSink buffer on top of the same WASAPI buffers).
+   Resampling note: miniaudio opens WASAPI with AUTOCONVERTPCM, so `internalSampleRate` always reads 48000; the
+   engine reads the mixer rate from `ma_device_get_info()` -> `nativeDataFormats[0]` (= GetMixFormat, WASAPI only)
+   and the GUI shows `S_N_RESAMPLE_FMT` when it is not 48000. Not triggered here (all devices at 48 kHz).
+   Soak tests with the new default, 0 underruns / 0 overruns each: file source -> "CABLE Input" (playback only,
+   10 min) and duplex "CABLE Output" -> Logitech headset (silent, 12 min). Period sizes are device dependent:
+   the headset forces 480-frame playback periods (buffer 1056 = 22 ms) but then the FIFO is 0; CABLE Input takes 240.
+   The variable-callback default also applies on Linux (capture-only engine, PipeWire tap) - untested there.
+   L0 measurement, 6 alternating runs x 6 configs, median RTT (min..max):
    default 81.5 (75.7..87.2) | --no-fixed 74.2 (65.0..78.1) | --pro-audio 78.4 | both 74.0 | --no-fixed --period 128
    72.4 | --no-fixed --periods 3 76.3 ms. Buffers: capture period 480 (buffer 1056), playback buffer 528 (280 at
    period 128), miniaudio intermediaries 240 + 240. Our side of the loop = ~26 ms; **~50-56 ms is VB-Cable + the

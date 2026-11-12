@@ -68,6 +68,17 @@ The DSP chain adds about 11.5 ms (RNNoise 10 ms with our look-ahead patch, limit
 End to end through WASAPI shared mode and VB-Cable it is typically 50-100 ms; the cable and the
 Windows audio buffers dominate. Measurements and the reasoning behind every default are in [CLAUDE.md](CLAUDE.md).
 
+On one test machine a VB-Cable loop measured ~75 ms: ~21 ms for the device buffers on mic thingy's side
+and 50-55 ms for the cable plus the Windows audio engine. In real use mic thingy also adds the DSP
+(11.5 ms) and its frame buffer (~5 ms), so its whole share is ~37 ms. Things you can do yourself:
+- Set the microphone, "CABLE Input" and "CABLE Output" to **48000 Hz** (Sound settings -> device ->
+  Advanced). Other rates make Windows resample, which adds delay; the app shows a note when it detects it.
+- VB-Cable's own control panel (`VBCABLE_ControlPanel.exe` in its install folder) has a latency /
+  buffer setting. A smaller buffer lowers the cable delay but can crackle on a busy system - try a step
+  at a time and listen. mic thingy cannot change this setting.
+- Measure the effect with `build\vf-latency` (plays short beeps into "CABLE Input" - anything
+  listening to "CABLE Output", e.g. Discord, hears them).
+
 ## Contributing
 
 Issues and pull requests are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).

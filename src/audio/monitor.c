@@ -19,6 +19,7 @@ int vf_monitor_init(VfMonitor *m, ma_context *ctx, const ma_device_id *id, VfSin
     cfg.periodSizeInFrames = VF_FRAME_SIZE / 2;
     cfg.periods = 2;
     cfg.performanceProfile = ma_performance_profile_low_latency;
+    cfg.noFixedSizedCallback = MA_TRUE;     /* the sink serves any block size: no extra buffer */
     cfg.playback.pDeviceID = id;
     cfg.playback.format = ma_format_f32;
     cfg.playback.channels = 1;

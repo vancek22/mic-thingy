@@ -560,7 +560,14 @@ int main(int argc, char **argv)
                 c.monitor = sel_mode == VF_OUT_VMIC_MONITOR ? sel_mon : -1;
                 c.file_src = file_buf;
                 c.file_len = file_len;
-                if (vf_session_start(&s, &c) == 0) { status[0] = '\0'; refresh_before_start = 0; }
+                if (vf_session_start(&s, &c) == 0) {
+                    status[0] = '\0'; refresh_before_start = 0;
+                    EngineLatency l;              /* device mixer not at 48 kHz -> resampler adds delay */
+                    engine_latency(&s.eng, &l);
+                    const unsigned bad = l.cap_mix_rate && l.cap_mix_rate != VF_SAMPLE_RATE ? l.cap_mix_rate
+                                       : l.play_mix_rate && l.play_mix_rate != VF_SAMPLE_RATE ? l.play_mix_rate : 0;
+                    if (bad) snprintf(note, sizeof note, tr(S_N_RESAMPLE_FMT), bad);
+                }
                 else {
                     /* keep trying (e.g. a USB headset that appears a few seconds after login) */
                     snprintf(status, sizeof status, tr(S_N_RETRY_FMT), s.error);

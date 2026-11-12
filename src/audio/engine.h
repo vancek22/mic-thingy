@@ -28,8 +28,8 @@ typedef struct EngineConfig {
     int period_frames;                 /* <= 0: VF_DEFAULT_PERIOD. Prefer divisors of 480. */
     const float *file_src;             /* non-NULL: replaces the microphone (looped) */
     long file_len;
-    /* Experimental device knobs (L1 A/B tests; all 0 = current defaults). */
-    int no_fixed_callback;             /* miniaudio noFixedSizedCallback: no intermediary buffers */
+    /* Device knobs for latency A/B tests (all 0 = defaults). */
+    int fixed_callback;                /* 1 = miniaudio fixed-size callbacks (old default, +~5 ms) */
     int pro_audio;                     /* WASAPI: MMCSS "Pro Audio" thread class */
     int periods;                       /* <= 0: 2 (miniaudio uses one value for capture and playback) */
 } EngineConfig;
@@ -54,6 +54,7 @@ typedef struct Engine {
     int   started;
     int   prime_samples;     /* silence pre-filled on the first callback */
     int   ftz_set;
+    unsigned cap_mix_rate, play_mix_rate;   /* device mixer rates (shared-mode mix format), 0 = unknown */
 
     atomic_uint underruns;   /* output starved after startup */
     atomic_uint overruns;    /* output FIFO overflowed */
@@ -75,6 +76,7 @@ typedef struct EngineLatency {
     unsigned cap_period, cap_periods, cap_buffer, cap_rate;     /* frames / count / frames / Hz */
     unsigned play_period, play_periods, play_buffer, play_rate;
     unsigned cap_interm, play_interm;                           /* intermediary capacity, frames */
+    unsigned cap_mix_rate, play_mix_rate;                       /* Windows mixer rate; != 48000 = resampling */
     unsigned blk_min, blk_max, blk_last;                        /* callback blocks seen, frames */
     int fifo_min, fifo_max, prime;                              /* samples */
     int wasapi;                                                 /* buffer sizes came from WASAPI */

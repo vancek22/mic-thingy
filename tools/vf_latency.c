@@ -1,7 +1,7 @@
 /* vf-latency: measures real device round-trip latency through a loopback path.
  *
  *   vf-latency [--out "CABLE Input"] [--in "CABLE Output"] [--period N] [--periods M]
- *              [--exclusive] [--seconds S] [--no-fixed] [--pro-audio]
+ *              [--exclusive] [--seconds S] [--fixed] [--pro-audio]
  *
  * A duplex miniaudio device (same configuration style as the mic thingy engine)
  * plays short tone bursts to --out and records --in. With VB-Cable the signal goes
@@ -9,7 +9,7 @@
  * capture buffering (+ miniaudio's duplex coupling). Analysis runs after the
  * stream stops; the callback only copies samples into preallocated buffers.
  * The device is configured by engine_device_config(), i.e. exactly like the
- * engine; --no-fixed / --pro-audio / --periods are the experimental engine knobs
+ * engine; --fixed / --pro-audio / --periods are the experimental engine knobs
  * (EngineConfig), so this tool is the A/B rig for buffer settings.
  *
  * WARNING: the bursts are audible to every application listening to --in. */
@@ -61,7 +61,7 @@ static int cmp_l(const void *a, const void *b)
 int main(int argc, char **argv)
 {
     const char *out_name = "CABLE Input", *in_name = "CABLE Output";
-    int period = VF_DEFAULT_PERIOD, periods = 2, exclusive = 0, no_fixed = 0, pro_audio = 0;
+    int period = VF_DEFAULT_PERIOD, periods = 2, exclusive = 0, fixed = 0, pro_audio = 0;
     double seconds = 6.0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--out") && i + 1 < argc) out_name = argv[++i];
@@ -70,7 +70,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--periods") && i + 1 < argc) periods = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = atof(argv[++i]);
         else if (!strcmp(argv[i], "--exclusive")) exclusive = 1;
-        else if (!strcmp(argv[i], "--no-fixed")) no_fixed = 1;
+        else if (!strcmp(argv[i], "--fixed")) fixed = 1;
         else if (!strcmp(argv[i], "--pro-audio")) pro_audio = 1;
         else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
     }
@@ -110,7 +110,7 @@ int main(int argc, char **argv)
     ec.playback_id = &plays.dev[oi].id;
     ec.period_frames = period;
     ec.periods = periods;
-    ec.no_fixed_callback = no_fixed;
+    ec.fixed_callback = fixed;
     ec.pro_audio = pro_audio;
     ma_device_config cfg;
     engine_device_config(&cfg, ma_device_type_duplex, &ec);
@@ -142,7 +142,7 @@ int main(int argc, char **argv)
     const unsigned cap_period = dev.capture.internalPeriodSizeInFrames;
     const unsigned play_interm = dev.playback.intermediaryBufferCap, cap_interm = dev.capture.intermediaryBufferCap;
     printf("real buffers: capture %u frames, playback %u frames; miniaudio fixed-size buffers: capture %u, playback %u%s%s\n",
-           cap_buf, play_buf, cap_interm, play_interm, no_fixed ? "  [--no-fixed]" : "", pro_audio ? "  [--pro-audio]" : "");
+           cap_buf, play_buf, cap_interm, play_interm, fixed ? "  [--fixed]" : "", pro_audio ? "  [--pro-audio]" : "");
     ma_device_start(&dev);
     while (atomic_load(&r.pos_in) < r.len) vf_sleep_ms(20);
     ma_device_stop(&dev);
@@ -182,7 +182,7 @@ int main(int argc, char **argv)
            "%.1f ms cable + OS (unattributed)\n",
            1000.0 * cap_period / SR, 1000.0 * play_buf / SR, 1000.0 * play_interm / SR, ours, med - ours);
     printf("RESULT,%s,%d,%d,%s%s,%.2f,%.2f,%.2f,%.2f\n", exclusive ? "excl" : "shared", period, periods,
-           no_fixed ? "nofixed" : "fixed", pro_audio ? "+pro" : "",
+           fixed ? "fixed" : "nofixed", pro_audio ? "+pro" : "",
            1000.0 * lags[0] / SR, med, 1000.0 * lags[found - 1] / SR, med - ours);
     free(r.play);
     free(r.rec);

@@ -24,7 +24,7 @@ typedef struct VfSessionConfig {
     VfOutMode mode;
     int period;            /* engine period request, 0 = default */
     int periods;           /* engine periods, 0 = default (2) */
-    int no_fixed_callback; /* experimental (EngineConfig) */
+    int fixed_callback;    /* 1 = old fixed-size callbacks (A/B tests; EngineConfig) */
     int pro_audio;         /* experimental (EngineConfig) */
     const float *file_src; /* optional file instead of the microphone */
     long file_len;

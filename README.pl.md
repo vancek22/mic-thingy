@@ -58,6 +58,18 @@ Przetwarzanie dodaje ok. 11,5 ms (RNNoise 10 ms + limiter 1,5 ms). Całość z b
 to zwykle 50–100 ms — cel 20 ms nie jest osiągalny w trybie współdzielonym WASAPI z VB-Cable.
 Szczegóły pomiarów: `CLAUDE.md`.
 
+Na komputerze testowym pętla przez VB-Cable trwała ok. 75 ms: ok. 21 ms bufory urządzeń po stronie
+mic thingy, 50–55 ms sam kabel i silnik audio Windows. W normalnej pracy mic thingy dokłada jeszcze
+filtry (11,5 ms) i bufor ramek (ok. 5 ms), więc cała jego część to ok. 37 ms. Co możesz zrobić sam:
+- Ustaw mikrofon, „CABLE Input” i „CABLE Output” na **48000 Hz** (Ustawienia dźwięku → urządzenie →
+  Zaawansowane). Inna częstotliwość wymusza przeliczanie próbek i dodaje opóźnienie; program pokazuje
+  wtedy komunikat.
+- Panel VB-Cable (`VBCABLE_ControlPanel.exe` w folderze instalacji) ma ustawienie opóźnienia / bufora.
+  Mniejszy bufor zmniejsza opóźnienie kabla, ale na obciążonym komputerze może trzeszczeć – zmieniaj
+  po jednym kroku i słuchaj. mic thingy nie zmieni tego ustawienia za Ciebie.
+- Efekt zmierzysz `build\vf-latency` (gra krótkie piski do „CABLE Input” – usłyszy je każda aplikacja
+  nasłuchująca „CABLE Output”, np. Discord).
+
 ## Licencja
 
 mic thingy jest otwartym oprogramowaniem na licencji [MIT](LICENSE) - można go używać, zmieniać i rozpowszechniać,

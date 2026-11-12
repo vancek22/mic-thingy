@@ -74,6 +74,17 @@ Zmiany w `engine_init()` (`src/audio/engine.c:112`), każdą mierzyć osobno 6 p
 
 Kryterium: pętla przez VB-Cable poniżej 45 ms bez niedoborów przez 10 minut (`xruns = 0`).
 
+**Stan L1 (2026-11-12): zrobione, kryterium 45 ms nie jest osiągalne.** Wdrożone: punkty 1 i 3
+(`noFixedSizedCallback`, `noPreSilencedOutputBuffer`; dla silnika i monitora), ostrzeżenie o częstotliwości
+innej niż 48 kHz (punkt 4), opis ustawień VB-Cable w README (punkt 8). Zysk ok. 5 ms (mediana ok. 80 → 75 ms).
+Zmierzone i odrzucone: `periods = 1` (WASAPI zostawia te same bufory), inne okresy, „Pro Audio”
+(w granicach rozrzutu). Niezmierzone, odrzucone z rozumowania: adaptacyjny priming (zmierzono, że WASAPI
+i tak woła co 240 próbek, więc 240 próbek FIFO jest konieczne), osobne urządzenia dla vmic (dokładają bufor
+`VfSink`). Nasza strona pętli pomiarowej (bufory urządzeń) to teraz ok. 21 ms, w programie dochodzi DSP 11,5 ms
+i FIFO 5 ms, razem ok. 37 ms;
+pozostałe 50–55 ms to VB-Cable i Windows – zejście poniżej 45 ms wymaga mniejszego bufora w panelu VB-Cable
+(ustawienie użytkownika) albo własnego sterownika (sekcja 7).
+
 ### L2. Tryb „low latency” w DSP (cel: DSP ≤ 2 ms)
 RNNoise potrzebuje ramki 480 próbek i nakładania okien, więc w torze sygnału zawsze kosztuje 10 ms.
 Rozwiązanie: RNNoise jako **analizator w torze bocznym**, a dźwięk idzie bez opóźnienia przez filtr,

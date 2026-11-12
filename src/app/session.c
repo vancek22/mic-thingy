@@ -118,7 +118,7 @@ int vf_session_start(VfSession *s, const VfSessionConfig *c)
     ec.no_playback = s->use_pw;
     ec.period_frames = c->period;
     ec.periods = c->periods;
-    ec.no_fixed_callback = c->no_fixed_callback;
+    ec.fixed_callback = c->fixed_callback;
     ec.pro_audio = c->pro_audio;
     ec.file_src = c->file_src;
     ec.file_len = c->file_len;
