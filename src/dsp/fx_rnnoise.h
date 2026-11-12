@@ -3,7 +3,7 @@
 
 #include "dsp/fx.h"
 
-enum { RNNOISE_PARAM_WET = 0 };   /* 0..1, dry/wet mix (default 1) */
+enum { RNNOISE_PARAM_WET = 0 };   /* 0..1, dry/wet mix (default 0.95) */
 
 /* Algorithmic delay of rnnoise_process_frame() in v0.2: two frames (overlap-add
  * window + one frame of look-ahead via `delayed_X`). Verified by tests/test_dsp.c.

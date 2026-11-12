@@ -9,7 +9,9 @@
 #define RN_SCALE 32768.0f
 
 static const FxParamInfo k_params[] = {
-    { "wet", "", 0.0f, 1.0f, 1.0f },     /* dry/wet mix */
+    /* dry/wet mix. 0.95 keeps a -26 dB dry floor: fricative onsets that RNNoise
+     * mistakes for noise lose ~10 dB instead of vanishing (see tools/run_audio_tests). */
+    { "wet", "", 0.0f, 1.0f, 0.95f },
 };
 
 typedef struct {
@@ -29,7 +31,7 @@ static int rn_init(Fx *fx, int sample_rate)
     if (!s) return -1;
     s->st = rnnoise_create(NULL);          /* built-in weights */
     if (!s->st) { free(s); return -1; }
-    s->wet = 1.0f;
+    s->wet = k_params[RNNOISE_PARAM_WET].def;
     fx->state = s;
     return 0;
 }
