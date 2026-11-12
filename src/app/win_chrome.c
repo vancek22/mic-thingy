@@ -33,9 +33,12 @@ void vf_window_style_titlebar(void *hwnd, unsigned caption_rgb, unsigned text_rg
     DwmSetWindowAttribute(h, DWMWA_TEXT_COLOR, &txt, sizeof txt);
     DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR, &brd, sizeof brd);
 }
+
+void vf_trim_memory(void) { SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1); }
 #else
 void vf_window_style_titlebar(void *hwnd, unsigned caption_rgb, unsigned text_rgb, unsigned border_rgb)
 {
     (void)hwnd; (void)caption_rgb; (void)text_rgb; (void)border_rgb;
 }
+void vf_trim_memory(void) {}
 #endif

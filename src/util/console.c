@@ -21,6 +21,13 @@ int vf_console_getkey(void)
     return c;
 }
 void vf_sleep_ms(int ms) { Sleep((DWORD)ms); }
+double vf_now_s(void)
+{
+    LARGE_INTEGER f, c;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&c);
+    return (double)c.QuadPart / (double)f.QuadPart;
+}
 
 #else
 #include <termios.h>
@@ -54,5 +61,11 @@ void vf_sleep_ms(int ms)
 {
     struct timespec ts = { ms / 1000, (long)(ms % 1000) * 1000000L };
     nanosleep(&ts, NULL);
+}
+double vf_now_s(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 #endif

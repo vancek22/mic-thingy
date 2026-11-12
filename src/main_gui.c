@@ -20,6 +20,7 @@
 #include "app/win_chrome.h"
 #include "app/settings.h"
 #include "app/tray.h"
+#include "util/console.h"
 #include "util/platform.h"
 #include "util/wavio.h"
 
@@ -393,6 +394,47 @@ static void fill_device_names(VfSettings *st, const VfSession *s, int in, int ou
 
 /* ------------------------------------------------------------------ main */
 
+/* ---- window lifetime: in the tray the window AND its OpenGL context are destroyed (the driver
+ * alone maps ~80 MB); showing the window creates them again. All app state lives in main(). ---- */
+static int g_win_open;
+static Texture2D logo_tex;
+
+static void window_open(int minimized)
+{
+    SetConfigFlags(FLAG_VSYNC_HINT);               /* no MSAA: the UI is rectangles + bitmap text */
+    InitWindow(WIN_W, WIN_H, "mic thingy");
+    SetWindowState(FLAG_WINDOW_ALWAYS_RUN);        /* keep the loop alive while minimized */
+    SetExitKey(KEY_NULL);                          /* Esc must not quit */
+    SetTargetFPS(60);
+    if (minimized) MinimizeWindow();
+    /* window icon (Windows also gets it from the .exe resource) and a title bar in the
+     * header colour instead of the white system one */
+    static unsigned char px[64 * 64 * 4];
+    vf_icon_render(px, 64, 1);
+    SetWindowIcon((Image){ px, 64, 64, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 });
+    vf_window_style_titlebar(GetWindowHandle(), 0x3A445C, 0xDCE6F5, 0x2A3140);
+    /* header logo rendered at its display size (36 px) so it gets the icon-size variant */
+    static unsigned char logo_px[36 * 36 * 4];
+    vf_icon_render(logo_px, 36, 1);
+    logo_tex = LoadTextureFromImage((Image){ logo_px, 36, 36, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 });
+    load_fonts();
+    apply_style();
+    g_win_open = 1;
+}
+
+static void window_close(void)
+{
+    if (!g_win_open) return;
+    /* raygui keeps a pointer to the active font and frees it in the next GuiLoadStyleDefault():
+     * point it back to the built-in font first, or reopening the window frees our fonts twice. */
+    GuiSetFont(GetFontDefault());
+    UnloadTexture(logo_tex);
+    unload_fonts();
+    CloseWindow();
+    g_win_open = 0;
+    vf_trim_memory();                              /* hand the freed pages back to the OS */
+}
+
 int main(int argc, char **argv)
 {
     int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0, demo = 0;
@@ -435,31 +477,12 @@ int main(int argc, char **argv)
     const int tray_ok = !shot && vf_tray_start() == 0;
     const int start_hidden = minimized && st.background && tray_ok;
 
-    SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | (start_hidden ? FLAG_WINDOW_HIDDEN : 0));
     SetTraceLogLevel(verbose ? LOG_INFO : LOG_WARNING);
-    InitWindow(WIN_W, WIN_H, "mic thingy");
     TraceLog(LOG_INFO, "mic thingy: tray %s, background %d, start hidden %d",
              tray_ok ? "ok" : "unavailable", st.background, start_hidden);
-    SetWindowState(FLAG_WINDOW_ALWAYS_RUN);       /* keep the loop alive while minimized/hidden */
-    SetExitKey(KEY_NULL);                         /* Esc must not quit */
-    SetTargetFPS(60);
-    if (minimized && !start_hidden) MinimizeWindow();
-    /* window icon (Windows also gets it from the .exe resource) and a title bar in the
-     * header colour instead of the white system one */
-    {
-        static unsigned char px[64 * 64 * 4];
-        vf_icon_render(px, 64, 1);
-        Image icon = { px, 64, 64, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
-        SetWindowIcon(icon);
-        vf_window_style_titlebar(GetWindowHandle(), 0x3A445C, 0xDCE6F5, 0x2A3140);
-    }
-    /* header logo rendered at its display size (36 px) so it gets the icon-size variant */
-    static unsigned char logo_px[36 * 36 * 4];
-    vf_icon_render(logo_px, 36, 1);
-    Texture2D logo_tex = LoadTextureFromImage((Image){ logo_px, 36, 36, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 });
+    /* Started to the tray: no window, no OpenGL context at all (that is most of the memory). */
+    if (!start_hidden) window_open(minimized);
     if (vf_autostart_migrate()) autostart_on = 1;   /* old "VoiceFilter" entry -> this exe */
-    load_fonts();
-    apply_style();
 
     /* selections */
     int sel_in = init_ok ? vf_session_default_mic(&s) : 0;
@@ -502,12 +525,15 @@ int main(int argc, char **argv)
     if (start_hidden) snprintf(note, sizeof note, "%s", tr(S_N_IN_TRAY));
 
     while (!quit) {
-        const float dt = GetFrameTime();
+        static double last_t;
+        const double now_t = vf_now_s();
+        const float dt = last_t > 0 ? (float)(now_t - last_t) : 0.016f;
+        last_t = now_t;
 
         /* ---- window close button: hide to tray in background mode, else quit ---- */
-        if (WindowShouldClose()) {
+        if (g_win_open && WindowShouldClose()) {
             if (st.background && !shot) {
-                if (tray_ok) { SetWindowState(FLAG_WINDOW_HIDDEN); hidden = 1; }
+                if (tray_ok) { window_close(); hidden = 1; }        /* destroys window + GL context */
                 else MinimizeWindow();
                 edit_in = edit_out = edit_preset = edit_name = 0;
             } else quit = 1;
@@ -516,15 +542,14 @@ int main(int argc, char **argv)
         /* ---- tray icon menu ---- */
         for (int ev; (ev = vf_tray_poll()) != VF_TRAY_NONE;) {
             if (ev == VF_TRAY_SHOW) {
-                ClearWindowState(FLAG_WINDOW_HIDDEN);
-                if (IsWindowMinimized()) RestoreWindow();
-                SetWindowFocused();
+                if (!g_win_open) window_open(0);
+                else { if (IsWindowMinimized()) RestoreWindow(); SetWindowFocused(); }
                 hidden = 0;
             } else if (ev == VF_TRAY_QUIT) quit = 1;
             else if (ev == VF_TRAY_TOGGLE_BYPASS) atomic_store(&s.pipe.bypass_all, !atomic_load(&s.pipe.bypass_all));
             else if (ev == VF_TRAY_TOGGLE_RUN) { want_running = !want_running; retry_at = 0; applied_in = -2; }
         }
-        SetTargetFPS(hidden || IsWindowMinimized() ? 10 : 60);
+        if (g_win_open) SetTargetFPS(IsWindowMinimized() ? 10 : IsWindowFocused() ? 60 : 30);   /* M4: draw less when not in use */
 
         /* ---- (re)start the session when the wanted configuration changes ---- */
         if (init_ok) {
@@ -532,12 +557,12 @@ int main(int argc, char **argv)
             if (s.running && ma_device_get_state(&s.eng.dev) != ma_device_state_started) {
                 vf_session_stop(&s);
                 snprintf(status, sizeof status, "%s", tr(S_N_DEVICE_LOST));
-                retry_at = GetTime() + 2.0;
+                retry_at = vf_now_s() + 2.0;
                 refresh_before_start = 1;
             }
             int cfg_changed = sel_in != applied_in || sel_out != applied_out || sel_mon != applied_mon ||
                               sel_mode != applied_mode;
-            if (want_running && (!s.running || cfg_changed) && GetTime() >= retry_at) {
+            if (want_running && (!s.running || cfg_changed) && vf_now_s() >= retry_at) {
                 if (refresh_before_start && !s.running) {
                     /* device indices may have changed: re-enumerate and find ours by name */
                     char n_in[256], n_out[256], n_mon[256];
@@ -571,7 +596,7 @@ int main(int argc, char **argv)
                 else {
                     /* keep trying (e.g. a USB headset that appears a few seconds after login) */
                     snprintf(status, sizeof status, tr(S_N_RETRY_FMT), s.error);
-                    retry_at = GetTime() + 3.0;
+                    retry_at = vf_now_s() + 3.0;
                     refresh_before_start = 1;
                 }
                 applied_in = sel_in; applied_out = sel_out; applied_mon = sel_mon; applied_mode = sel_mode;
@@ -587,8 +612,8 @@ int main(int argc, char **argv)
         if (init_ok && have_settings_path) {
             unsigned long long h = settings_hash(&s, &st, sel_in, sel_out, sel_mon, sel_mode);
             if (h != saved_hash) {
-                if (dirty_since < 0) dirty_since = GetTime();
-                if (GetTime() - dirty_since > 1.0) {
+                if (dirty_since < 0) dirty_since = vf_now_s();
+                if (vf_now_s() - dirty_since > 1.0) {
                     fill_device_names(&st, &s, sel_in, sel_out, sel_mon, sel_mode);
                     if (vf_settings_save(&st, &s.pipe, settings_file) != 0)
                         snprintf(status, sizeof status, tr(S_N_SAVE_SETTINGS_FAIL), settings_file);
@@ -598,9 +623,8 @@ int main(int argc, char **argv)
             }
         }
 
-        if (hidden) {                       /* in the tray: no UI work, just keep events flowing */
-            BeginDrawing();
-            EndDrawing();
+        if (hidden || !g_win_open) {       /* in the tray: no window at all, only tray events, retries, autosave */
+            vf_sleep_ms(50);
             continue;
         }
 
@@ -619,7 +643,7 @@ int main(int argc, char **argv)
         text(F.lcd, "v1.0", 66 + logo_w, 12, C_TEXT_DIM);
         text(F.ui, tr(S_SUBTITLE), 66 + logo_w, 26, C_TEXT);
         {   /* blinking "power" LED */
-            const int on = s.running && ((int)(GetTime() * 2) % 2 || !atomic_load(&s.pipe.bypass_all));
+            const int on = s.running && ((int)(vf_now_s() * 2) % 2 || !atomic_load(&s.pipe.bypass_all));
             DrawCircle(WIN_W - 128, 24, 6, on ? C_NEON : C_SEG_OFF);
             if (on) DrawCircle(WIN_W - 128, 24, 12, (Color){ 57, 255, 20, 45 });
         }
@@ -903,7 +927,7 @@ int main(int argc, char **argv)
         DrawRectangle(0, WIN_H - 27, WIN_W, 1, C_NEON);
         text(F.lcd, "> ", 10, sr.y + 6, C_NEON);
         text(F.lcd, sb, 30, sr.y + 6, status[0] ? C_RED : C_TEXT);
-        if ((int)(GetTime() * 2) % 2) {                       /* blinking block cursor */
+        if ((int)(vf_now_s() * 2) % 2) {                       /* blinking block cursor */
             const float cw = MeasureTextEx(F.lcd, sb, 14, 0).x;
             DrawRectangle((int)(34 + cw), (int)sr.y + 6, 8, 14, status[0] ? C_RED : C_NEON);
         }
@@ -942,9 +966,7 @@ int main(int argc, char **argv)
     }
     vf_tray_stop();
     vf_session_free(&s);
-    UnloadTexture(logo_tex);
-    unload_fonts();
-    CloseWindow();
+    window_close();
     free(file_buf);
     return 0;
 }

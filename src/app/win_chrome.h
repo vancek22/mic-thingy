@@ -7,4 +7,8 @@
 /* hwnd = GetWindowHandle() from raylib. Colours are 0xRRGGBB. */
 void vf_window_style_titlebar(void *hwnd, unsigned caption_rgb, unsigned text_rgb, unsigned border_rgb);
 
+/* Returns freed pages to the OS (Windows: trims the working set). Call after the window and its
+ * OpenGL context were destroyed. */
+void vf_trim_memory(void);
+
 #endif
