@@ -59,6 +59,7 @@ add_library(vfcore STATIC
   src/dsp/fx_dereverb.c
   src/dsp/fx_voice.c
   src/dsp/fx_aec.c
+  src/dsp/anc.c
   src/dsp/chain.c
   src/dsp/pipeline.c
   src/dsp/spectrum.c
@@ -78,6 +79,7 @@ add_library(vfcore STATIC
   src/app/theme.c
   src/app/automute.c
   src/app/appwatch.c
+  src/app/howl.c
   src/app/abtest.c
   src/util/thread.c
   src/util/cmdline.c

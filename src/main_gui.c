@@ -20,6 +20,7 @@
 #include "app/automute.h"
 #include "app/calibrate.h"
 #include "app/hotkeys.h"
+#include "app/howl.h"
 #include "app/i18n.h"
 #include "app/icon_art.h"
 #include "app/overlay.h"
@@ -402,7 +403,7 @@ static unsigned long long settings_hash(const VfSession *s, const VfSettings *st
     for (const char *p = st->language; *p; p++) MIX(*p);
     for (const char *p = st->theme; *p; p++) MIX(*p);
     MIX(st->compact); MIX(st->overlay); MIX(st->overlay_corner); MIX(st->per_mic); MIX(st->auto_mute_lock);
-    MIX(st->auto_mute_idle_min); MIX(st->ptt_enabled); MIX(st->apps_enabled); MIX(st->sys_enabled); MIX(st->monitor_raw);
+    MIX(st->auto_mute_idle_min); MIX(st->howl_guard); MIX(st->ptt_enabled); MIX(st->apps_enabled); MIX(st->sys_enabled); MIX(st->monitor_raw);
     MIX((long long)(st->monitor_gain_db * 10)); MIX((long long)(st->board_gain_db * 10));
     MIX((long long)(st->sys_gain_db * 10)); MIX((long long)(st->sys_duck_db * 10));
     for (const char *p = st->sys_device; *p; p++) MIX(*p);

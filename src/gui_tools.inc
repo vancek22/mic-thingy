@@ -41,6 +41,8 @@ typedef struct Ui {
     int sys_running;
     double sys_retry;
     int idle_noted;
+    VfHowl howl;
+    long talk_frames;                       /* 10 ms frames with the voice detector above 0.5 */
     int corner_shown;
     unsigned long long hk_hash;
 } Ui;
@@ -82,6 +84,7 @@ static void sync_hotkeys(void)
 static void ui_frame(const float *f)
 {
     vf_stats_frame(&U.stats, f);
+    if (f[VF_M_VAD] > 0.5f) U.talk_frames++;
     if (U.cal.state == VF_CAL_SILENCE || U.cal.state == VF_CAL_SPEECH) vf_cal_frame(&U.cal, f);
 }
 
@@ -389,6 +392,7 @@ static void draw_tools(Rectangle area, VfSession *s, VfSettings *st, int sel_mod
         text(F.lcd, t, box.x + 14, py, q.limiter_pct > 30 ? C_AMBER : C_TEXT);
         py += 26;
     } else py += 12;
+    { const long ts = U.talk_frames / 100; snprintf(t, sizeof t, tr(S_TALK_FMT), (int)(ts / 60), (int)(ts % 60)); text(F.lcd, t, box.x + 14, box.y + ph - 22, C_TEXT_DIM); }
     text(F.ui, tr(S_Q_HISTORY), box.x + 14, py, C_TEXT_DIM);
     py += 22;
     unsigned hist[30];
@@ -454,6 +458,8 @@ static void draw_settings(Rectangle area, VfSession *s, VfSettings *st, VfPreset
     py = box.y + 36;
     int pm = st->per_mic;
     if (check_row(box, &py, tr(S_PER_MIC), &pm, 1)) st->per_mic = pm;
+    int hg = st->howl_guard;
+    if (check_row(box, &py, tr(S_HOWL_GUARD), &hg, 1)) st->howl_guard = hg;
     int al = st->auto_mute_lock;
 #ifdef _WIN32
     if (check_row(box, &py, tr(S_AUTOMUTE_LOCK), &al, 1)) { st->auto_mute_lock = al; }
@@ -699,7 +705,8 @@ static void ui_tick(VfSession *s, double now, int running_window, UiLink *L)
     U.rec_was_active = vf_rec_active(&U.rec);
 
     /* spectrum feed only while it is visible */
-    const int want_scope = running_window && !U.compact && U.tab == 3 && U.scope_ready;
+    const int howl_on = st->howl_guard && s->running && s->has_mon && U.scope_ready;
+    const int want_scope = ((running_window && !U.compact && U.tab == 3) || howl_on) && U.scope_ready;
     if (want_scope) {
         if (atomic_load(&s->pipe.scope_ring) != &U.scope) atomic_store(&s->pipe.scope_ring, &U.scope);
         float blk[2 * VF_FRAME_SIZE];
@@ -710,6 +717,14 @@ static void ui_tick(VfSession *s, double now, int running_window, UiLink *L)
             got++;
         }
         vf_spec_update(&U.spec, 0.85f);
+        if (howl_on) {
+            const float hz = vf_howl_update(&U.howl, st->monitor_raw ? U.spec.in_db : U.spec.out_db);
+            if (hz > 0.0f) {
+                st->monitor_gain_db = fmaxf(-40.0f, st->monitor_gain_db - 12.0f);
+                vf_session_monitor_set(s, st->monitor_gain_db, st->monitor_raw);
+                note_set(tr(S_N_HOWL_FMT), (double)hz);
+            }
+        }
     } else if (atomic_load(&s->pipe.scope_ring) != NULL) {
         atomic_store(&s->pipe.scope_ring, NULL);
         vf_ring_read(&U.scope, NULL, vf_ring_available(&U.scope));

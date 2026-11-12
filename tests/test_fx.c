@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "dsp/chain.h"
+#include "dsp/anc.h"
 #include "dsp/fx_aec.h"
 #include "dsp/fx_agc.h"
 #include "dsp/fx_breath.h"
@@ -390,6 +391,73 @@ static void test_aec(void)
     vf_sink_free(&ref);
 }
 
+/* ---- ANC skeleton: simulated ear cup ---- */
+typedef struct { float buf[16]; } Plant;
+static float sec_plant(void *ctx, float y)           /* secondary path S: 3 samples delay 0.6, 5 samples 0.2 */
+{
+    Plant *p = (Plant *)ctx;
+    memmove(p->buf + 1, p->buf, 15 * sizeof(float));
+    p->buf[0] = y;
+    return 0.6f * p->buf[3] + 0.2f * p->buf[5];
+}
+
+static void test_anc(void)
+{
+    printf("active noise cancellation skeleton (simulated)\n");
+    Plant sp = { { 0 } };
+    float sec[32];
+    vf_anc_identify(sec, 32, sec_plant, &sp, 20000);
+    CHECK(fabsf(sec[3] - 0.6f) < 0.02f && fabsf(sec[5] - 0.2f) < 0.02f && fabsf(sec[0]) < 0.02f, "secondary path identified: h3 %.3f h5 %.3f", (double)sec[3], (double)sec[5]);
+
+    static VfAnc anc;
+    vf_anc_init(&anc, 128, 0.1f, sec, 32);
+    Plant s2 = { { 0 } };
+    float xbuf[16] = { 0 };                            /* primary path P: noise reaches the ear 8 samples late */
+    double pd = 0, pe = 0;
+    float e = 0.0f;
+    const long N = SR * 6;
+    for (long n = 0; n < N; n++) {
+        const float t = (float)n / SR;
+        const float x = 0.3f * sinf(2 * 3.14159f * 120 * t) + 0.2f * sinf(2 * 3.14159f * 240 * t) + 0.1f * sinf(2 * 3.14159f * 360 * t) + 0.02f * noise();
+        memmove(xbuf + 1, xbuf, 15 * sizeof(float));
+        xbuf[0] = x;
+        const float d = 0.8f * xbuf[8] + 0.3f * xbuf[10];
+        const float y = vf_anc_tick(&anc, x, e, 1);
+        e = d + sec_plant(&s2, y);
+        if (n >= N - SR) { pd += (double)d * d; pe += (double)e * e; }
+    }
+    const double red = 10 * log10(pd / (pe + 1e-20));
+    printf("  residual at the ear: %.1f dB below the noise (hum + a little broadband)\n", red);
+    CHECK(red > 15.0, "FxLMS reduction %.1f dB", red);
+
+    /* fixed inversion: perfect when the paths have no delay, useless at high frequencies when they do */
+    VfAnc inv;
+    vf_anc_init(&inv, 1, 0.0f, NULL, 0);
+    vf_anc_set_invert(&inv, 1, 1.0f);
+    double e0 = 0, d0 = 0;
+    float dl[16] = { 0 };
+    for (long n = 0; n < SR; n++) {
+        const float t = (float)n / SR;
+        const float lo = sinf(2 * 3.14159f * 100 * t), hi = sinf(2 * 3.14159f * 4000 * t);
+        const float x = lo + hi;
+        memmove(dl + 1, dl, 15 * sizeof(float));
+        dl[0] = x;
+        const float y = vf_anc_tick(&inv, x, 0.0f, 0);
+        const float noise_at_ear = dl[10];                         /* ear is 10 samples (0.2 ms) later; anti-noise has no delay */
+        const float res = noise_at_ear + y;
+        (void)hi;
+        if (n > 1000) { e0 += (double)res * res; d0 += (double)noise_at_ear * noise_at_ear; }
+    }
+    printf("  fixed inversion with a 0.2 ms mismatch, 100 Hz + 4 kHz together: %.1f dB\n", 10 * log10(d0 / (e0 + 1e-20)));
+    CHECK(10 * log10(d0 / (e0 + 1e-20)) < 3.0, "a broadband 4 kHz component must NOT be cancelled by plain inversion (%.1f dB)", 10 * log10(d0 / (e0 + 1e-20)));
+    /* and without any mismatch it is exact */
+    vf_anc_init(&inv, 1, 0.0f, NULL, 0);
+    vf_anc_set_invert(&inv, 1, 1.0f);
+    float worst = 0;
+    for (long n = 0; n < 4800; n++) { const float x = 0.5f * sinf(0.3f * (float)n); const float r = x + vf_anc_tick(&inv, x, 0.0f, 0); if (fabsf(r) > worst) worst = fabsf(r); }
+    CHECK(worst < 1e-6f, "aligned inversion leaves %g", (double)worst);
+}
+
 static void test_chain_defaults(void)
 {
     printf("optional effects default to off\n");
@@ -431,6 +499,7 @@ int main(void)
 {
     test_chain_defaults();
     test_aec();
+    test_anc();
     test_hum();
     test_guard();
     test_warmth();

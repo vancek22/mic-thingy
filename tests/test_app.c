@@ -11,6 +11,7 @@
 #include "app/automute.h"
 #include "app/calibrate.h"
 #include "app/hotkeys.h"
+#include "app/howl.h"
 #include "app/recorder.h"
 #include "app/settings.h"
 #include "app/soundboard.h"
@@ -814,6 +815,59 @@ static void test_vmic_shm(void)
     free(s);
 }
 
+static unsigned g_rng_h = 4242;
+static float noise(void) { g_rng_h = g_rng_h * 1103515245u + 12345u; return (((g_rng_h >> 16) & 0x7fff) / 16384.0f) - 1.0f; }
+
+static void test_howl(void)
+{
+    printf("feedback (howl) detector\n");
+    static VfSpectrum sp;
+    static VfHowl h;
+    static float a[VF_SPEC_N], z[VF_SPEC_N];
+    memset(z, 0, sizeof z);
+
+    /* a tone that grows by itself: 3 kHz from -40 dBFS, +20 dB per second */
+    vf_spec_init(&sp); vf_howl_init(&h);
+    float fired = 0; int when = -1;
+    for (int u = 0; u < 150 && fired == 0; u++) {
+        const double amp = pow(10.0, (-40.0 + 20.0 * (u / 50.0)) / 20.0);
+        for (int i = 0; i < VF_SPEC_N; i++) a[i] = (float)(amp * sin(2 * PI * 3000.0 * (double)(u * 960 + i) / SR));
+        vf_spec_push(&sp, a, a, VF_SPEC_N);
+        vf_spec_update(&sp, 0.0f);
+        fired = vf_howl_update(&h, sp.out_db);
+        when = u;
+    }
+    printf("  growing 3 kHz line detected at %.0f Hz after %d updates\n", (double)fired, when + 1);
+    CHECK(fabsf(fired - 3000.0f) < 100.0f && when < 100, "growing tone not detected (%.0f Hz, update %d)", (double)fired, when);
+
+    /* a steady loud tone (a musical note) is not feedback */
+    vf_spec_init(&sp); vf_howl_init(&h);
+    fired = 0;
+    for (int u = 0; u < 400; u++) {
+        for (int i = 0; i < VF_SPEC_N; i++) a[i] = (float)(0.1 * sin(2 * PI * 440.0 * (double)(u * 960 + i) / SR));
+        vf_spec_push(&sp, a, a, VF_SPEC_N);
+        vf_spec_update(&sp, 0.0f);
+        const float f = vf_howl_update(&h, sp.out_db);
+        if (f > 0) fired = f;
+    }
+    CHECK(fired == 0.0f, "steady tone flagged as feedback (%.0f Hz)", (double)fired);
+
+    /* broadband noise and silence */
+    vf_spec_init(&sp); vf_howl_init(&h);
+    fired = 0;
+    for (int u = 0; u < 300; u++) {
+        for (int i = 0; i < VF_SPEC_N; i++) a[i] = 0.2f * noise() * (1.0f + (float)u / 100.0f);
+        vf_spec_push(&sp, a, a, VF_SPEC_N);
+        vf_spec_update(&sp, 0.0f);
+        const float f = vf_howl_update(&h, sp.out_db);
+        if (f > 0) fired = f;
+    }
+    CHECK(fired == 0.0f, "growing noise flagged (%.0f Hz)", (double)fired);
+    vf_spec_push(&sp, z, z, VF_SPEC_N);
+    vf_spec_update(&sp, 0.0f);
+    CHECK(vf_howl_update(&h, sp.out_db) == 0.0f, "silence");
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -834,6 +888,7 @@ int main(void)
     test_spectrum_and_scope();
     test_abtest();
     test_vmic_shm();
+    test_howl();
     printf(g_fail ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

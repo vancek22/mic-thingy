@@ -81,6 +81,7 @@ void vf_settings_defaults(VfSettings *s)
     s->monitor_raw = 0;
     snprintf(s->theme, sizeof s->theme, "graphite");
     s->overlay_corner = 1;
+    s->howl_guard = 1;
     s->win_x = s->win_y = s->cwin_x = s->cwin_y = -32000;
     s->board_gain_db = 0.0f; s->sys_gain_db = -6.0f; s->sys_duck_db = -12.0f;
     snprintf(s->hk_mute, sizeof s->hk_mute, "ctrl+alt+m");
@@ -191,6 +192,7 @@ int vf_settings_load(VfSettings *s, Pipeline *p, const char *path)
     s->cwin_x = vf_ini_get_int(&ini, "window", "compact_x", s->cwin_x);
     s->cwin_y = vf_ini_get_int(&ini, "window", "compact_y", s->cwin_y);
     s->per_mic = vf_ini_get_int(&ini, "app", "per_mic_profiles", s->per_mic) != 0;
+    s->howl_guard = vf_ini_get_int(&ini, "app", "howl_guard", s->howl_guard) != 0;
     s->auto_mute_lock = vf_ini_get_int(&ini, "app", "auto_mute_lock", s->auto_mute_lock) != 0;
     s->auto_mute_idle_min = vf_ini_get_int(&ini, "app", "auto_mute_idle_min", s->auto_mute_idle_min);
     if (s->auto_mute_idle_min < 0 || s->auto_mute_idle_min > 600) s->auto_mute_idle_min = 0;
@@ -245,8 +247,8 @@ int vf_settings_save(const VfSettings *s, const Pipeline *p, const char *path)
                "\n[app]\nlanguage = %s\nstart_processing = %d\nbackground = %d\npreset = %s\n",
             s->input, s->output, s->monitor, mode_name(s->mode), s->bypass,
             s->language, s->start_processing, s->background, s->preset);
-    fprintf(f, "theme = %s\ncompact = %d\noverlay = %d\noverlay_corner = %d\nper_mic_profiles = %d\nauto_mute_lock = %d\nauto_mute_idle_min = %d\n",
-            s->theme, s->compact, s->overlay, s->overlay_corner, s->per_mic, s->auto_mute_lock, s->auto_mute_idle_min);
+    fprintf(f, "theme = %s\ncompact = %d\noverlay = %d\noverlay_corner = %d\nper_mic_profiles = %d\nauto_mute_lock = %d\nauto_mute_idle_min = %d\nhowl_guard = %d\n",
+            s->theme, s->compact, s->overlay, s->overlay_corner, s->per_mic, s->auto_mute_lock, s->auto_mute_idle_min, s->howl_guard);
     fprintf(f, "\n[audio_extra]\nmonitor_gain_db = %.1f\nmonitor_raw = %d\n", (double)s->monitor_gain_db, s->monitor_raw);
     fprintf(f, "\n[window]\nx = %d\ny = %d\ncompact_x = %d\ncompact_y = %d\n", s->win_x, s->win_y, s->cwin_x, s->cwin_y);
     fprintf(f, "\n[mix]\nboard_gain_db = %.1f\nsys_gain_db = %.1f\nsys_duck_db = %.1f\nsys_enabled = %d\nsys_device = %s\n",

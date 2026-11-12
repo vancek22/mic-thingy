@@ -182,6 +182,10 @@ static const char *const k_str[S_COUNT][VF_LANG_COUNT] = {
     [S_N_CAL_APPLIED] = { "Calibration applied", "Zastosowano kalibrację" },
     [S_COMPACT_TITLE] = { "mic thingy", "mic thingy" },
 
+    [S_HOWL_GUARD] = { "Lower the monitor on feedback", "Ścisz odsłuch przy sprzężeniu" },
+    [S_N_HOWL_FMT] = { "Feedback at %.0f Hz - monitor lowered", "Sprzężenie przy %.0f Hz - ścięto odsłuch" },
+    [S_TALK_FMT] = { "Talk time %d:%02d", "Czas mówienia %d:%02d" },
+
 };
 
 typedef struct { const char *key; const char *en, *pl; } Pair;
