@@ -526,3 +526,40 @@ float rnnoise_process_frame(DenoiseState *st, float *out, const float *in) {
   return vad_prob;
 }
 
+
+/* mic thingy patch (see PATCHES.md): gains instead of synthesis, used by the low-latency mode. */
+int rnnoise_get_freq_size(void) {
+  return FREQ_SIZE;
+}
+
+float rnnoise_analyze_frame(DenoiseState *st, const float *in, float *gains) {
+  int i;
+  kiss_fft_cpx X[FREQ_SIZE];
+  kiss_fft_cpx P[FREQ_SIZE];
+  float x[FRAME_SIZE];
+  float Ex[NB_BANDS], Ep[NB_BANDS];
+  float Exp[NB_BANDS];
+  float features[NB_FEATURES];
+  float g[NB_BANDS];
+  float vad_prob = 0;
+  int silence;
+  static const float a_hp[2] = {-1.99599, 0.99600};
+  static const float b_hp[2] = {-2, 1};
+  rnn_biquad(x, st->mem_hp_x, in, b_hp, a_hp, FRAME_SIZE);
+  silence = rnn_compute_frame_features(st, X, P, Ex, Ep, Exp, features, x);
+  for (i=0;i<FREQ_SIZE;i++) gains[i] = 1.f;
+  if (!silence) {
+#if !TRAINING
+    compute_rnn(&st->model, &st->rnn, g, &vad_prob, features, st->arch);
+#endif
+    rnn_pitch_filter(X, P, Ex, Ep, Exp, g);
+    for (i=0;i<NB_BANDS;i++) {
+      float alpha = .6f;
+      g[i] = MAX16(g[i], alpha*st->lastg[i]);
+      st->lastg[i] = g[i];
+    }
+    for (i=0;i<FREQ_SIZE;i++) gains[i] = 0.f;   /* like upstream: bins above 20 kHz stay 0 */
+    interp_band_gain(gains, g);
+  }
+  return vad_prob;
+}

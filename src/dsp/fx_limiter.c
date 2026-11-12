@@ -7,9 +7,9 @@
 static const FxParamInfo k_params[] = {
     { "ceiling", "dB", -12.0f, 0.0f,    -1.0f, 0 },
     { "release", "ms", 5.0f,   1000.0f, 60.0f, 0 },
+    { "lookahead", "ms", 0.0f, 1.5f,    1.5f,  0 },
 };
 
-#define D     LIMITER_LOOKAHEAD
 #define RING  128
 #define MASK  (RING - 1)
 
@@ -24,6 +24,7 @@ typedef struct {
     float mn[RING];       /* window minimum of tgt */
     double sum;           /* sum of the last D values of mn */
     float env;            /* smoothed gain */
+    int   d;              /* current look-ahead, samples (0..LIMITER_LOOKAHEAD) */
     unsigned idx;
 } LimState;
 
@@ -35,7 +36,8 @@ static int lim_init(Fx *fx, int sr)
     s->ceiling_lin = vf_db_to_lin(k_params[LIM_CEILING_DB].def);
     s->rel = vf_coef_ms(k_params[LIM_RELEASE_MS].def, s->sr);
     for (int i = 0; i < RING; i++) { s->tgt[i] = 1.0f; s->mn[i] = 1.0f; }
-    s->sum = D;
+    s->d = LIMITER_LOOKAHEAD;
+    s->sum = s->d;
     s->env = 1.0f;
     fx->state = s;
     return 0;
@@ -55,17 +57,17 @@ static void lim_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
         s->tgt[w] = a > c ? c / a : 1.0f;
 
         float m = 1.0f;                           /* min over the last D+1 targets */
-        for (unsigned k = 0; k <= D; k++) {
+        for (unsigned k = 0; k <= (unsigned)s->d; k++) {
             const float t = s->tgt[(idx - k) & MASK];
             if (t < m) m = t;
         }
-        s->sum += (double)m - (double)s->mn[(idx - D) & MASK];
+        s->sum += (double)m - (double)s->mn[(idx - (unsigned)s->d) & MASK];
         s->mn[w] = m;
 
-        const float g = (float)(s->sum / D);
+        const float g = s->d > 0 ? (float)(s->sum / s->d) : m;
         s->env = g < s->env ? g : g + s->rel * (s->env - g);
 
-        float y = s->dly[(idx - D) & MASK] * s->env;
+        float y = s->dly[(idx - (unsigned)s->d) & MASK] * s->env;
         if (y > c) y = c; else if (y < -c) y = -c;   /* float round-off safety */
         buf[i] = y;
     }
@@ -78,6 +80,14 @@ static void lim_set_param(Fx *fx, int id, float v)
     v = vf_clampf(v, k_params[id].min, k_params[id].max);
     if (id == LIM_CEILING_DB) s->ceiling_lin = vf_db_to_lin(v);
     else if (id == LIM_RELEASE_MS) s->rel = vf_coef_ms(v, s->sr);
+    else if (id == LIM_LOOKAHEAD_MS) {
+        /* new window length: restart the (tiny) history so the sums stay consistent */
+        const int d = (int)(v * 0.001f * s->sr + 0.5f);
+        s->d = d > LIMITER_LOOKAHEAD ? LIMITER_LOOKAHEAD : d;
+        for (int i = 0; i < RING; i++) { s->tgt[i] = 1.0f; s->mn[i] = 1.0f; s->dly[i] = 0.0f; }
+        s->sum = s->d;
+        atomic_store_explicit(&fx->latency, s->d, memory_order_relaxed);
+    }
 }
 
 static void lim_destroy(Fx *fx) { free(fx->state); fx->state = NULL; }

@@ -100,6 +100,21 @@ RNNOISE_EXPORT float rnnoise_process_frame(DenoiseState *st, float *out, const f
 RNNOISE_EXPORT void rnnoise_set_lookahead(DenoiseState *st, int enabled);
 
 /**
+ * mic thingy patch: number of per-bin gains rnnoise_analyze_frame() returns (481 at 48 kHz:
+ * bin k is at k * 50 Hz).
+ */
+RNNOISE_EXPORT int rnnoise_get_freq_size(void);
+
+/**
+ * mic thingy patch: runs the analysis and the network on one frame like rnnoise_process_frame()
+ * (always without look-ahead) but, instead of synthesising output, returns the per-bin gains the
+ * frame would have been multiplied with (all 1.0 for a silent frame). `in` is in the same
+ * +-32768 range as for rnnoise_process_frame(), `gains` has rnnoise_get_freq_size() floats.
+ * Returns the VAD probability. Do not mix with rnnoise_process_frame() on the same state.
+ */
+RNNOISE_EXPORT float rnnoise_analyze_frame(DenoiseState *st, const float *in, float *gains);
+
+/**
  * Load a model from a memory buffer
  *
  * It must be deallocated with rnnoise_model_free() and the buffer must remain

@@ -17,6 +17,7 @@
 #include "dsp/fx_gate.h"
 #include "dsp/fx_highpass.h"
 #include "dsp/fx_limiter.h"
+#include "dsp/minphase.h"
 #include "util/cmdline.h"
 
 #define SR VF_SAMPLE_RATE
@@ -343,6 +344,99 @@ static void test_rnnoise_delay(void)
     }
     CHECK(maxerr < 1e-6f, "no-lookahead wet 0 should be input delayed by 480, max err %g", (double)maxerr);
     fx.destroy(&fx);
+}
+
+/* Low-latency mode: minimum-phase filter design, delay, limiter without look-ahead. */
+static void test_lowlat(void)
+{
+    printf("low latency mode\n");
+    static VfMinPhase mp;
+    vf_minphase_init(&mp);
+    float h[VF_MP_TAPS], g[481];
+
+    /* flat gains -> identity filter */
+    for (int k = 0; k < 481; k++) g[k] = 1.0f;
+    vf_minphase_design(&mp, g, 481, h);
+    float off = 0;
+    for (int i = 1; i < VF_MP_TAPS; i++) off += fabsf(h[i]);
+    CHECK(fabsf(h[0] - 1.0f) < 1e-3f && off < 1e-2f, "flat gains: h0 %.4f, rest %.4f", (double)h[0], (double)off);
+
+    /* low-pass shape (1 below 1 kHz, 0.1 above 3 kHz, linear between) with a dead band above 20 kHz */
+    for (int k = 0; k < 481; k++) {
+        const float f = k * 50.0f;
+        g[k] = f <= 1000 ? 1.0f : f >= 3000 ? 0.1f : 1.0f - 0.9f * (f - 1000) / 2000;
+        if (k >= 400) g[k] = 0.0f;
+    }
+    vf_minphase_design(&mp, g, 481, h);
+    const double fr[] = { 300, 800, 5000, 12000 };
+    const double want[] = { 0, 0, -20, -20 };
+    for (int i = 0; i < 4; i++) {
+        double re = 0, im = 0;
+        for (int n = 0; n < VF_MP_TAPS; n++) { re += h[n] * cos(2 * PI * fr[i] * n / SR); im -= h[n] * sin(2 * PI * fr[i] * n / SR); }
+        const double db = 20 * log10(sqrt(re * re + im * im));
+        CHECK(fabs(db - want[i]) < 1.5, "response at %.0f Hz = %.2f dB, want %.0f", fr[i], db, want[i]);
+    }
+    double e_all = 0, e_head = 0, cen = 0;                      /* causal and compact: minimum phase */
+    for (int n = 0; n < VF_MP_TAPS; n++) { e_all += (double)h[n] * h[n]; cen += (double)h[n] * h[n] * n; if (n < 48) e_head += (double)h[n] * h[n]; }
+    CHECK(e_head > 0.98 * e_all, "energy in the first 48 taps %.3f", e_head / e_all);
+    printf("  low-pass design: energy centroid at tap %.1f\n", cen / e_all);
+
+    /* the RNNoise stage: lag of the output, and that it still denoises (noise-only input gets quieter) */
+    static float in[LAT_N], out[LAT_N];
+    speechish(in, LAT_N);
+    Fx fx; fx_rnnoise_make(&fx); start(&fx);
+    fx.set_param(&fx, RNNOISE_PARAM_LOWLAT, 1.0f);
+    fx.set_param(&fx, RNNOISE_PARAM_WET, 1.0f);
+    CHECK(atomic_load(&fx.latency) == RNNOISE_LL_DELAY, "latency field %d", atomic_load(&fx.latency));
+    run_fx_on(&fx, in, out, LAT_N);
+    double r;
+    long lag = best_lag(in, out, LAT_N, 1500, &r);
+    printf("  rnnoise low-latency delay = %ld samples (%.2f ms), corr %.2f\n", lag, 1000.0 * lag / SR, r);
+    CHECK(lag <= RNNOISE_LL_DELAY, "low-latency lag %ld > declared %d", lag, RNNOISE_LL_DELAY);
+    int bad = 0;
+    for (long i = 0; i < LAT_N; i++) if (!isfinite(out[i]) || fabsf(out[i]) > 4.0f) bad++;
+    CHECK(bad == 0, "%d non-finite/huge samples", bad);
+    {   /* white noise only: must be attenuated like the normal path does (> 6 dB) */
+        unsigned s = 777; double ein = 0, eout = 0;
+        static float nz[LAT_N], no[LAT_N];
+        for (long i = 0; i < LAT_N; i++) { s = s * 1103515245u + 12345u; nz[i] = 0.05f * (((s >> 16) & 0x7fff) / 16384.0f - 1.0f); }
+        fx.destroy(&fx); start(&fx);
+        fx.set_param(&fx, RNNOISE_PARAM_LOWLAT, 1.0f); fx.set_param(&fx, RNNOISE_PARAM_WET, 1.0f);
+        run_fx_on(&fx, nz, no, LAT_N);
+        for (long i = SR; i < LAT_N; i++) { ein += (double)nz[i] * nz[i]; eout += (double)no[i] * no[i]; }
+        printf("  white noise through low-latency RNNoise: %.1f dB\n", 10 * log10(eout / ein));
+        CHECK(10 * log10(eout / ein) < -6.0, "noise not attenuated: %.1f dB", 10 * log10(eout / ein));
+    }
+    fx.destroy(&fx);
+
+    /* limiter without look-ahead: no delay, ceiling still holds, latency field follows */
+    Fx lim; fx_limiter_make(&lim); start(&lim);
+    lim.set_param(&lim, LIM_LOOKAHEAD_MS, 0.0f);
+    CHECK(atomic_load(&lim.latency) == 0, "limiter latency %d", atomic_load(&lim.latency));
+    FxFrameCtx ctx = { 0 };
+    const float c = powf(10.0f, -1.0f / 20.0f);
+    float peak = 0; long t = 0;
+    for (int f = 0; f < 200; f++) {
+        float b[VF_FRAME_SIZE];
+        for (int i = 0; i < VF_FRAME_SIZE; i++, t++) b[i] = f < 100 ? (float)(2.0 * sin(2 * PI * 440.0 * t / SR)) : ((t % 100 < 50) ? 4.0f : -4.0f);
+        lim.process(&lim, b, VF_FRAME_SIZE, &ctx);
+        for (int i = 0; i < VF_FRAME_SIZE; i++) if (fabsf(b[i]) > peak) peak = fabsf(b[i]);
+    }
+    CHECK(peak <= c + 1e-5f, "no-look-ahead limiter peak %.5f > ceiling %.5f", (double)peak, (double)c);
+    lim.destroy(&lim);
+
+    /* whole chain with the preset: delay drops from 11.5 ms to the FIR delay */
+    static Chain chain; static Pipeline p;
+    pipeline_init(&p); chain_build(&chain, &p); pipeline_start(&p, SR);
+    FILE *sink = tmpfile();
+    vf_cmd_execute(&p, "set rnnoise lowlat 1", sink);
+    vf_cmd_execute(&p, "set limiter lookahead 0", sink);
+    if (sink) fclose(sink);
+    for (long off = 0; off + VF_FRAME_SIZE <= 4 * VF_FRAME_SIZE; off += VF_FRAME_SIZE) pipeline_process(&p, out + off);   /* apply params */
+    const int d = pipeline_delay_samples(&p);
+    printf("  chain delay in low-latency mode = %d samples (%.2f ms)\n", d, 1000.0 * d / SR);
+    CHECK(d == RNNOISE_LL_DELAY, "pipeline_delay_samples %d", d);
+    pipeline_stop(&p);
 }
 
 static void test_chain_delay(void)
@@ -734,6 +828,7 @@ int main(void)
     test_engine_taps();
     test_rnnoise_delay();
     test_chain_delay();
+    test_lowlat();
     test_engine_blocks();
     test_highpass();
     test_gate();

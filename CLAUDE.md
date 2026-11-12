@@ -197,3 +197,20 @@ RNNoise has no upstream CMake: built by our own target using the portable (non-x
      the logo at its display size (36 px) for that reason.
      Hi-res renders: assets/logo-1024.png, assets/logo-256.png (make_icon writes any <name>-<size>.png).
    - Not published anywhere yet (the user chose "prepare only").
+## Performance work log (docs/PLAN_PERFORMANCE.md)
+- **M1** (2026-11-13): in background mode the window AND its OpenGL context are destroyed (`window_open`/`window_close`
+  in main_gui.c; `GuiSetFont(GetFontDefault())` before unloading fonts or raygui double-frees on reopen; raylib `GetTime()`
+  is invalid without a window -> `vf_now_s()`). Tray with engine running: private working set 61.9 MB -> 0.8-2.3 MB;
+  window open ~70-86 MB (mostly the GL driver). No MSAA. 30 fps when unfocused.
+- **L2 low-latency mode** (`rnnoise lowlat 1`, preset "Low latency" = + `limiter lookahead 0`): RNNoise only analyses
+  (`rnnoise_analyze_frame`, third_party/rnnoise/PATCHES.md #2); its 481 per-bin gains become a 128-tap minimum-phase FIR
+  (`src/dsp/minphase.c`, cepstral method, 1024-pt FFT) that filters the SAME frame, cross-faded from the previous frame's
+  filter over 240 samples. DSP delay 11.5 ms -> 8 samples (declared; measured lag 3). CPU 78 -> 105 us per 10 ms frame.
+  Audio matrix (denoise profile, 28 noisy mixes) vs default: SDR 13.1 -> 8.9 dB (stationary noise: pink 14.6 -> 6.7,
+  white 17.5 -> 8.8; hum/keyboard/babble unchanged), pause attenuation 23.2 -> 22.2 dB, onsets -0.3 dB, clean speech
+  unchanged. Longer filters (256/512/768 taps) give the same SDR: the loss is TIME alignment - the gains describe the
+  960-sample window centred at the frame START and are applied to the 480 samples after it (avg 5 ms late), which is
+  inherent to a zero-latency design. Default stays "quality"; the user decides after listening.
+- Not done (reasoned): M2 two processes (tray is already ~1 MB), M3 software renderer (raylib 5.5 has none), L3 exclusive
+  WASAPI (measured worse), RNNoise AVX2 (CPU is 0.8% of a core). Not done: processing the chain on device-sized blocks
+  (would save the 0-5 ms FIFO but needs delayed gains).

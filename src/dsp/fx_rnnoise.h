@@ -5,8 +5,13 @@
 
 enum {
     RNNOISE_PARAM_WET = 0,        /* 0..1, dry/wet mix (default 0.95) */
-    RNNOISE_PARAM_LOOKAHEAD       /* 1 = upstream (20 ms delay), 0 = patched, 10 ms (default) */
+    RNNOISE_PARAM_LOOKAHEAD,      /* 1 = upstream (20 ms delay), 0 = patched, 10 ms (default) */
+    RNNOISE_PARAM_LOWLAT          /* 1 = low-latency mode (min-phase FIR from RNNoise gains), 0 = default */
 };
+
+/* Low-latency mode delay: group delay of the minimum-phase FIR (measured by tests/test_dsp.c;
+ * the filter is applied to the frame it was designed from, so there is no overlap-add delay). */
+#define RNNOISE_LL_DELAY 8
 
 #define RNNOISE_DELAY_NO_LOOKAHEAD VF_FRAME_SIZE
 

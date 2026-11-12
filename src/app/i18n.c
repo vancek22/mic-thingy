@@ -92,6 +92,8 @@ static const Pair k_params[] = {
     { "highpass.freq",     "Frequency", "Częstotliwość" },
     { "rnnoise.wet",       "Strength", "Siła" },
     { "rnnoise.lookahead", "Look-ahead (+10 ms, better quality)", "Wyprzedzenie (+10 ms, lepsza jakość)" },
+    { "rnnoise.lowlat",    "Low latency (~0.5 ms, rougher)", "Niskie opóźnienie (~0,5 ms, mniej gładkie)" },
+    { "limiter.lookahead", "Look-ahead", "Wyprzedzenie" },
     { "gate.threshold",    "Voice threshold", "Próg głosu" },
     { "gate.hold",         "Hold", "Podtrzymanie" },
     { "gate.attack",       "Attack", "Otwieranie" },

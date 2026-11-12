@@ -22,6 +22,9 @@ static const BuiltinPreset k_builtin[] = {
     { "natural", "Natural", "Naturalny",
       { "set rnnoise wet 0.85", "set gate threshold 0.4", "set gate floor -25",
         "set comp ratio 2", "set comp makeup 1", NULL } },
+    /* ~1.5 ms DSP delay instead of 11.5: RNNoise gains drive a min-phase FIR, limiter without look-ahead */
+    { "lowlat", "Low latency", "Niskie opóźnienie",
+      { "set rnnoise lowlat 1", "set limiter lookahead 0", NULL } },
 };
 #define N_BUILTIN ((int)(sizeof k_builtin / sizeof k_builtin[0]))
 
