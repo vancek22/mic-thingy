@@ -278,11 +278,13 @@ static void test_rnnoise_delay(void)
     printf("rnnoise delay / dry-wet\n");
     static float in[LAT_N], out[LAT_N];
     speechish(in, LAT_N);
+    /* upstream mode (look-ahead on) first */
     Fx fx; fx_rnnoise_make(&fx); start(&fx);
+    fx.set_param(&fx, RNNOISE_PARAM_LOOKAHEAD, 1.0f);
     run_fx_on(&fx, in, out, LAT_N);
     double r;
     long lag = best_lag(in, out, LAT_N, 1500, &r);
-    printf("  rnnoise delay = %ld samples (%.1f ms), corr %.2f\n", lag, 1000.0 * lag / SR, r);
+    printf("  rnnoise delay (look-ahead) = %ld samples (%.1f ms), corr %.2f\n", lag, 1000.0 * lag / SR, r);
     /* +-3: RNNoise's internal DC-blocking high-pass shifts the correlation peak slightly */
     CHECK(labs(lag - RNNOISE_DELAY_SAMPLES) <= 3, "RNNOISE_DELAY_SAMPLES (%d) does not match measured %ld",
           RNNOISE_DELAY_SAMPLES, lag);
@@ -290,6 +292,7 @@ static void test_rnnoise_delay(void)
     /* wet 0.5 must not comb-filter: the dry path has to be delayed by the same amount,
      * so the output correlates with the input at ONE lag only. */
     fx.destroy(&fx); start(&fx);
+    fx.set_param(&fx, RNNOISE_PARAM_LOOKAHEAD, 1.0f);
     fx.set_param(&fx, RNNOISE_PARAM_WET, 0.5f);
     run_fx_on(&fx, in, out, LAT_N);
     double r0, r1;
@@ -305,6 +308,7 @@ static void test_rnnoise_delay(void)
 
     /* wet 0 = pure (delayed) dry signal, bit-exact apart from the delay */
     fx.destroy(&fx); start(&fx);
+    fx.set_param(&fx, RNNOISE_PARAM_LOOKAHEAD, 1.0f);
     fx.set_param(&fx, RNNOISE_PARAM_WET, 0.0f);
     run_fx_on(&fx, in, out, LAT_N);
     float maxerr = 0;
@@ -358,7 +362,7 @@ static void test_chain_delay(void)
         pipeline_process(&p, out + off);
     double r;
     long lag = best_lag(in, out, LAT_N, 2000, &r);
-    long expect = RNNOISE_DELAY_SAMPLES + LIMITER_LOOKAHEAD;
+    long expect = RNNOISE_DELAY_NO_LOOKAHEAD + LIMITER_LOOKAHEAD;   /* default chain */
     printf("  chain delay = %ld samples (%.1f ms), corr %.2f\n", lag, 1000.0 * lag / SR, r);
     CHECK(labs(lag - expect) <= 3, "chain delay %ld, expected ~%ld", lag, expect);
     CHECK(pipeline_delay_samples(&p) == expect, "pipeline_delay_samples %d", pipeline_delay_samples(&p));

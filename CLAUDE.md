@@ -20,8 +20,8 @@ Linux: `sudo apt install build-essential cmake ninja-build libpipewire-0.3-dev l
 - Audio -> UI metrics: atomics for scalar meters; lock-free SPSC ring buffer for streams (stage 4).
 - 48 kHz, 480-sample frames (RNNoise requirement). Engine re-chunks arbitrary device block sizes via preallocated FIFOs.
 - RNNoise wants float samples in int16 range: scale x32768 in, /32768 out (done in `fx_rnnoise.c`).
-- Target end-to-end latency <= 20 ms - currently NOT met: RNNoise v0.2 alone adds 20 ms (2 frames: overlap-add +
-  one frame look-ahead `delayed_X`), limiter 1.5 ms, FIFO pre-fill 0-10 ms (480 - gcd(block, 480) samples),
+- Target end-to-end latency <= 20 ms - currently NOT met: RNNoise adds 10 ms (overlap-add; upstream look-ahead
+  disabled by default, +10 ms if `rnnoise lookahead 1`), limiter 1.5 ms, FIFO pre-fill 0-10 ms (480 - gcd(block, 480) samples),
   plus WASAPI buffers. Each effect declares `Fx.latency`; `engine_latency()` sums it. Always report latency honestly.
 
 ## Testing (run after every DSP/engine change)
@@ -52,7 +52,8 @@ Linux: `sudo apt install build-essential cmake ninja-build libpipewire-0.3-dev l
    RTT 70.2 + FIFO 7.5 = 77.7 ms, 160 -> 67.4 + 6.7 = 74.1, 240 -> 73.4 + 5.0 = 78.4: no reliable gain, kept 240
    (`voicefilter-cli --period N` to experiment).
    RNNoise `lookahead 0` (our patch, third_party/rnnoise/PATCHES.md) saves 10 ms; audio matrix cost: SDR -0.6 dB,
-   pause attenuation -0.8 dB, onsets -0.5 dB, real recordings unchanged.
+   pause attenuation -0.8 dB, onsets -0.5 dB, real recordings unchanged. DEFAULT since 2026-11-12 (user's choice):
+   chain DSP delay = 480 (RNNoise) + 72 (limiter) = 11.5 ms.
 Numbers are not a judgement of sound quality - the user listens; propose default changes, don't retune silently.
 
 ## Effect module interface (`src/dsp/fx.h`)

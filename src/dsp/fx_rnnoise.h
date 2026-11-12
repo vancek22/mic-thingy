@@ -5,7 +5,7 @@
 
 enum {
     RNNOISE_PARAM_WET = 0,        /* 0..1, dry/wet mix (default 0.95) */
-    RNNOISE_PARAM_LOOKAHEAD       /* 1 = upstream (20 ms delay), 0 = patched, 10 ms */
+    RNNOISE_PARAM_LOOKAHEAD       /* 1 = upstream (20 ms delay), 0 = patched, 10 ms (default) */
 };
 
 #define RNNOISE_DELAY_NO_LOOKAHEAD VF_FRAME_SIZE
