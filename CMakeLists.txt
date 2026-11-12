@@ -97,6 +97,8 @@ if(WIN32)
   # Own object library: windres breaks on the target include paths when the project
   # path contains spaces ("mic thingy"), and the resource needs none.
   add_library(vf_resources OBJECT ${CMAKE_BINARY_DIR}/mic-thingy.rc)
+  # the .rc only names the .ico, so rebuild the resource whenever the icon file changes
+  set_source_files_properties(${CMAKE_BINARY_DIR}/mic-thingy.rc PROPERTIES OBJECT_DEPENDS ${VF_ICON_PATH})
   set(VF_RESOURCES $<TARGET_OBJECTS:vf_resources>)
 endif()
 
