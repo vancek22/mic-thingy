@@ -84,8 +84,13 @@ struct DenoiseState {
   kiss_fft_cpx delayed_P[FREQ_SIZE];
   float delayed_Ex[NB_BANDS], delayed_Ep[NB_BANDS];
   float delayed_Exp[NB_BANDS];
-
+  int no_lookahead;   /* VoiceFilter patch: apply gains to the current frame (-10 ms) */
 };
+
+/* VoiceFilter patch (see third_party/rnnoise/PATCHES.md). */
+void rnnoise_set_lookahead(DenoiseState *st, int enabled) {
+  st->no_lookahead = !enabled;
+}
 
 static void compute_band_energy(float *bandE, const kiss_fft_cpx *X) {
   int i;
@@ -471,6 +476,28 @@ float rnnoise_process_frame(DenoiseState *st, float *out, const float *in) {
   rnn_biquad(x, st->mem_hp_x, in, b_hp, a_hp, FRAME_SIZE);
   silence = rnn_compute_frame_features(st, X, P, Ex, Ep, Exp, features, x);
 
+  if (st->no_lookahead) {
+    /* VoiceFilter patch: no one-frame look-ahead. Gains computed from this frame
+       are applied to this frame's spectrum, saving FRAME_SIZE samples of delay. */
+    if (!silence) {
+#if !TRAINING
+      compute_rnn(&st->model, &st->rnn, g, &vad_prob, features, st->arch);
+#endif
+      rnn_pitch_filter(X, P, Ex, Ep, Exp, g);
+      for (i=0;i<NB_BANDS;i++) {
+        float alpha = .6f;
+        g[i] = MAX16(g[i], alpha*st->lastg[i]);
+        st->lastg[i] = g[i];
+      }
+      interp_band_gain(gf, g);
+      for (i=0;i<FREQ_SIZE;i++) {
+        X[i].r *= gf[i];
+        X[i].i *= gf[i];
+      }
+    }
+    frame_synthesis(st, out, X);
+    return vad_prob;
+  }
   if (!silence) {
 #if !TRAINING
     compute_rnn(&st->model, &st->rnn, g, &vad_prob, features, st->arch);

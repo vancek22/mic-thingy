@@ -78,7 +78,7 @@ void engine_init_offline(Engine *e, Pipeline *pipe)
 }
 
 int engine_init(Engine *e, ma_context *ctx, Pipeline *pipe,
-                const ma_device_id *capture_id, const ma_device_id *playback_id)
+                const ma_device_id *capture_id, const ma_device_id *playback_id, int period_frames)
 {
     memset(e, 0, sizeof *e);
     e->pipe = pipe;
@@ -87,7 +87,7 @@ int engine_init(Engine *e, ma_context *ctx, Pipeline *pipe,
 
     ma_device_config cfg = ma_device_config_init(ma_device_type_duplex);
     cfg.sampleRate = VF_SAMPLE_RATE;
-    cfg.periodSizeInFrames = VF_FRAME_SIZE / 2;   /* 5 ms; FIFOs re-chunk to 480 */
+    cfg.periodSizeInFrames = (ma_uint32)(period_frames > 0 ? period_frames : VF_DEFAULT_PERIOD);
     cfg.periods = 2;
     cfg.performanceProfile = ma_performance_profile_low_latency;
     cfg.capture.pDeviceID = capture_id;

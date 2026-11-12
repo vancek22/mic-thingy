@@ -94,6 +94,12 @@ RNNOISE_EXPORT void rnnoise_destroy(DenoiseState *st);
 RNNOISE_EXPORT float rnnoise_process_frame(DenoiseState *st, float *out, const float *in);
 
 /**
+ * VoiceFilter patch: enable (default) or disable the one-frame look-ahead.
+ * Disabled = output delay drops from 2 to 1 frame (20 -> 10 ms at 48 kHz).
+ */
+RNNOISE_EXPORT void rnnoise_set_lookahead(DenoiseState *st, int enabled);
+
+/**
  * Load a model from a memory buffer
  *
  * It must be deallocated with rnnoise_model_free() and the buffer must remain

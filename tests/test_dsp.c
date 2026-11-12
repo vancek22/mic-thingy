@@ -313,6 +313,26 @@ static void test_rnnoise_delay(void)
         if (e > maxerr) maxerr = e;
     }
     CHECK(maxerr < 1e-6f, "wet 0 should be the delayed input, max err %g", (double)maxerr);
+
+    /* patched mode without look-ahead: one frame less delay, dry path follows */
+    fx.destroy(&fx); start(&fx);
+    fx.set_param(&fx, RNNOISE_PARAM_LOOKAHEAD, 0.0f);
+    fx.set_param(&fx, RNNOISE_PARAM_WET, 1.0f);
+    CHECK(atomic_load(&fx.latency) == RNNOISE_DELAY_NO_LOOKAHEAD, "latency field %d", atomic_load(&fx.latency));
+    run_fx_on(&fx, in, out, LAT_N);
+    lag = best_lag(in, out, LAT_N, 1500, &r);
+    printf("  rnnoise delay without look-ahead = %ld samples (%.1f ms), corr %.2f\n", lag, 1000.0 * lag / SR, r);
+    CHECK(labs(lag - RNNOISE_DELAY_NO_LOOKAHEAD) <= 3, "no-lookahead delay %ld", lag);
+    fx.destroy(&fx); start(&fx);
+    fx.set_param(&fx, RNNOISE_PARAM_LOOKAHEAD, 0.0f);
+    fx.set_param(&fx, RNNOISE_PARAM_WET, 0.0f);
+    run_fx_on(&fx, in, out, LAT_N);
+    maxerr = 0;
+    for (long i = RNNOISE_DELAY_NO_LOOKAHEAD; i < LAT_N - VF_FRAME_SIZE; i++) {
+        float e = fabsf(out[i] - in[i - RNNOISE_DELAY_NO_LOOKAHEAD]);
+        if (e > maxerr) maxerr = e;
+    }
+    CHECK(maxerr < 1e-6f, "no-lookahead wet 0 should be input delayed by 480, max err %g", (double)maxerr);
     fx.destroy(&fx);
 }
 

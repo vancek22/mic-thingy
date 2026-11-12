@@ -92,6 +92,6 @@ void fx_limiter_make(Fx *fx)
     fx->destroy = lim_destroy;
     fx->params = k_params;
     fx->n_params = (int)(sizeof k_params / sizeof k_params[0]);
-    fx->latency = LIMITER_LOOKAHEAD;
+    atomic_init(&fx->latency, LIMITER_LOOKAHEAD);
     atomic_init(&fx->bypass, 0);
 }

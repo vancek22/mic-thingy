@@ -78,7 +78,7 @@ int pipeline_delay_samples(const Pipeline *p)
     if (atomic_load(&((Pipeline *)p)->bypass_all)) return 0;
     int d = 0;
     for (int i = 0; i < p->count; i++)
-        if (!atomic_load(&p->fx[i]->bypass)) d += p->fx[i]->latency;
+        if (!atomic_load(&p->fx[i]->bypass)) d += atomic_load(&p->fx[i]->latency);
     return d;
 }
 

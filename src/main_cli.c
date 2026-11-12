@@ -45,10 +45,11 @@ static void meter(char *dst, size_t n, float db)   /* -60..0 dB over 20 cells */
 
 int main(int argc, char **argv)
 {
-    int pre_in = -1, pre_out = -1;
+    int pre_in = -1, pre_out = -1, period = 0;
     for (int i = 1; i + 1 < argc; i++) {
         if (!strcmp(argv[i], "--in"))  pre_in  = atoi(argv[i + 1]);
         if (!strcmp(argv[i], "--out")) pre_out = atoi(argv[i + 1]);
+        if (!strcmp(argv[i], "--period")) period = atoi(argv[i + 1]);
     }
 
     vf_console_init();
@@ -86,7 +87,7 @@ int main(int argc, char **argv)
     static Engine eng;
     if (engine_init(&eng, &ctx, &pipe,
                     ci >= 0 ? &caps.dev[ci].id : NULL,
-                    pi >= 0 ? &plays.dev[pi].id : NULL) != 0 ||
+                    pi >= 0 ? &plays.dev[pi].id : NULL, period) != 0 ||
         engine_start(&eng) != 0) {
         fprintf(stderr, "Cannot open/start audio devices.\n");
         engine_uninit(&eng);

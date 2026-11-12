@@ -36,7 +36,7 @@ struct Fx {
     void (*destroy)(Fx *fx);
     const FxParamInfo *params;                                            /* n_params entries */
     int n_params;
-    int latency;                  /* algorithmic delay in samples (constant) */
+    atomic_int latency;           /* algorithmic delay in samples (may change with params) */
     atomic_int bypass;                                                    /* 1 = skip */
 };
 

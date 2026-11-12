@@ -48,7 +48,11 @@ Linux: `sudo apt install build-essential cmake ninja-build libpipewire-0.3-dev l
    "CABLE Output" in one miniaudio duplex device, prints the round trip. Measured 2026-11-12 (shared mode):
    period 240x2 (engine default) ~75-88 ms, 120x2 ~58-74 ms, 480x2 ~98-108 ms, exclusive is worse (95-130 ms).
    WASAPI shared capture on this machine is fixed at 480-frame periods; playback minimum is 128. Run-to-run spread
-   is +-8 ms (start-up alignment), so compare settings with several runs.
+   is +-8 ms (start-up alignment), so compare settings with several runs. 6 alternating runs each: period 120 ->
+   RTT 70.2 + FIFO 7.5 = 77.7 ms, 160 -> 67.4 + 6.7 = 74.1, 240 -> 73.4 + 5.0 = 78.4: no reliable gain, kept 240
+   (`voicefilter-cli --period N` to experiment).
+   RNNoise `lookahead 0` (our patch, third_party/rnnoise/PATCHES.md) saves 10 ms; audio matrix cost: SDR -0.6 dB,
+   pause attenuation -0.8 dB, onsets -0.5 dB, real recordings unchanged.
 Numbers are not a judgement of sound quality - the user listens; propose default changes, don't retune silently.
 
 ## Effect module interface (`src/dsp/fx.h`)
@@ -58,7 +62,8 @@ Each effect = own `.c/.h` with `Fx` descriptor: `init(fx, sr)`, `process(fx, buf
 ## Layout
 `src/audio` engine, devices, miniaudio impl | `src/dsp` effects + pipeline | `src/util` console, commands, wav I/O, config |
 `tools` offline processor, evaluator, test-set scripts | `tests` ctest | `third_party` vendored libs.
-Third-party code (pinned): miniaudio 0.11.26, RNNoise v0.2 (+ model weights `rnnoise_data-0b50c45`, compiled in), raylib 5.5 + raygui 4.0 (stage 4).
+Third-party code (pinned): miniaudio 0.11.26, RNNoise v0.2 (+ model weights `rnnoise_data-0b50c45`, compiled in; local
+patch documented in `third_party/rnnoise/PATCHES.md` - keep it up to date), raylib 5.5 + raygui 4.0 (stage 4).
 RNNoise has no upstream CMake: built by our own target using the portable (non-x86-RTCD) code path.
 
 ## Conventions

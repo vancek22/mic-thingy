@@ -3,7 +3,12 @@
 
 #include "dsp/fx.h"
 
-enum { RNNOISE_PARAM_WET = 0 };   /* 0..1, dry/wet mix (default 0.95) */
+enum {
+    RNNOISE_PARAM_WET = 0,        /* 0..1, dry/wet mix (default 0.95) */
+    RNNOISE_PARAM_LOOKAHEAD       /* 1 = upstream (20 ms delay), 0 = patched, 10 ms */
+};
+
+#define RNNOISE_DELAY_NO_LOOKAHEAD VF_FRAME_SIZE
 
 /* Algorithmic delay of rnnoise_process_frame() in v0.2: two frames (overlap-add
  * window + one frame of look-ahead via `delayed_X`). Verified by tests/test_dsp.c.

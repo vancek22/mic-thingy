@@ -37,9 +37,12 @@ typedef struct EngineLatency {
     unsigned capture_rate, playback_rate;
 } EngineLatency;
 
-/* NULL ids select the system default device. 0 = ok. */
+#define VF_DEFAULT_PERIOD 240   /* frames per device period (request; the OS may round it) */
+
+/* NULL ids select the system default device. period_frames <= 0 = VF_DEFAULT_PERIOD.
+ * Prefer divisors of 480 (e.g. 120, 160, 240): the FIFO pre-fill is 480 - gcd(period, 480). 0 = ok. */
 int  engine_init(Engine *e, ma_context *ctx, Pipeline *pipe,
-                 const ma_device_id *capture_id, const ma_device_id *playback_id);
+                 const ma_device_id *capture_id, const ma_device_id *playback_id, int period_frames);
 int  engine_start(Engine *e);
 void engine_stop(Engine *e);
 void engine_uninit(Engine *e);
