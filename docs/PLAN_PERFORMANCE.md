@@ -156,6 +156,8 @@ i zaznaczyć, co trzeba sprawdzić na Linuksie.
 
 Sugerowana kolejność: F9 (zabezpiecza resztę prac), F1, F2, F4, F6, potem pozostałe.
 
+Kolejne 19 funkcji (N1–N19) wraz z planem wdrożenia: `docs/PLAN_FEATURES.md`.
+
 ## 7. Własny sterownik wirtualnego mikrofonu (Windows, zamiast VB-Cable)
 
 Cel: użytkownik nie instaluje VB-Cable; w systemie pojawia się urządzenie nagrywające
