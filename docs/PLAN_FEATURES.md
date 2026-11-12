@@ -145,3 +145,35 @@ Zależności od planu wydajności:
 
 Po każdej paczce: build bez ostrzeżeń, `ctest`, zrzut GUI, pomiar pamięci w tle (< 40 MB) i sumy
 opóźnień, aktualizacja `CLAUDE.md` i README, commit.
+
+## Stan realizacji (2026-11-13)
+
+Fundamenty: B1 łańcuch 14 efektów, B2 zakładki (Podstawowe / Dodatkowe / Efekty / Narzędzia / Ustawienia), B3 szyna miksu
+przed limiterem (z duckingiem), B4 skróty (odpytywanie klawiatury), B5 wyciszenie z rampą 10 ms, B6 wątek nagrywania,
+B7 statystyki sekundowe, B8 motywy jako dane — wszystkie zrobione.
+
+| # | Funkcja | Stan |
+|---|---|---|
+| N1 | redukcja pogłosu | etap 1 (ekspander ogona, 0 ms); etap 2 (spektralny) nie zrobiony |
+| N2 | przydźwięk 50/60 Hz | zrobione, z autodetekcją |
+| N3 | oddechy i mlaśnięcia (+ F6 kliknięcia) | zrobione (heurystyka VAD + transjenty HF) |
+| N4 | ocieplenie | zrobione |
+| N5 | efekty głosu | zrobione (wysokość: dwa odczyty z crossfade, 15 ms opóźnienia przy przesunięciu; robot; radio) |
+| N6 | ochrona przed krzykiem | zrobione |
+| N7 | odsłuch własnego głosu | zrobione (poziom + surowy/przetworzony, tryb „Mic + monitor”) |
+| N8 | automatyczne wyciszenie | zrobione (blokada ekranu, cisza po N minutach) |
+| N9 | soundboard | zrobione (8 klipów, 15 s / 8 MB, upuszczanie plików, skrót pod prawym przyciskiem) |
+| N10 | dźwięk systemu | etap 1 (cały dźwięk urządzenia, ostrzeżenie o rozmówcach); wybór aplikacji nie zrobiony |
+| N11 | profile per mikrofon | zrobione |
+| N12 | eksport/import presetów | zrobione (schowek, plik, upuszczenie .ini) |
+| N13 | cofnij / ponów / porównaj | zrobione (Ctrl+Z / Ctrl+Y, przytrzymaj „Compare”) |
+| N14 | miernik jakości | zrobione |
+| N15 | historia zacięć | zrobione (30 minut) |
+| N16 | nagrywanie do pliku | zrobione (stereo: surowy + filtrowany) |
+| N17 | tryb kompaktowy | zrobione |
+| N18 | motywy | zrobione (3 motywy, test rozróżnialności kolorów stanu) |
+| N19 | nakładka w grze | zrobione (Windows; okno warstwowe, bez wstrzykiwania kodu) |
+
+Nie przetestowane na żywo: dźwięk systemu z prawdziwą aplikacją, AEC w prawdziwym pokoju, skróty klawiszowe wciskane
+fizycznie (logika i parsowanie testowane), nakładka w grze pełnoekranowej. Linux: nic z tej listy nie było
+kompilowane poza przenośną logiką (CI jest pierwszą okazją).

@@ -654,7 +654,7 @@ int main(int argc, char **argv)
             else if (ev == VF_TRAY_TOGGLE_RUN) { want_running = !want_running; retry_at = 0; applied_in = -2; }
             else if (ev == VF_TRAY_TOGGLE_MUTE) vf_automute_toggle(&U.am, vf_now_s());
         }
-        if (g_win_open) SetTargetFPS(IsWindowMinimized() ? 10 : IsWindowFocused() ? 60 : 30);   /* M4: draw less when not in use */
+        if (g_win_open) SetTargetFPS(IsWindowMinimized() ? 10 : U.compact ? 20 : IsWindowFocused() ? 60 : 20);   /* M4: draw less when not in use */
 
         /* ---- (re)start the session when the wanted configuration changes ---- */
         if (init_ok) {

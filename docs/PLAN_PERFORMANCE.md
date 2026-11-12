@@ -242,3 +242,20 @@ szacunkowo 20–40 ms (do potwierdzenia pomiarem po L0).
 Wielkość: to największy punkt planu, porównywalny z całym dotychczasowym projektem, i jedyny,
 którego nie da się przetestować automatycznie na tej maszynie. Robić po L0–L2 i M1, bo dopiero pomiar
 z L0 pokaże, ile milisekund VB-Cable faktycznie zabiera.
+
+## Stan realizacji (2026-11-13)
+
+| Etap | Stan | Uwagi |
+|---|---|---|
+| L0 pomiar buforów | zrobione | `engine_latency()` z prawdziwymi buforami WASAPI, `vf-latency` na tej samej konfiguracji co silnik |
+| L1 bufory urządzeń | zrobione | zmienne bloki wywołań (−5 ms); reszta zmierzona i odrzucona; 50–55 ms to VB-Cable + Windows |
+| L2 tryb niskiego opóźnienia | zrobione | preset „Low latency”: filtry 11,5 ms → 0,2 ms; SDR na szumie stacjonarnym −4 dB (wzmocnienia ~5 ms starsze niż audio) |
+| L3 opcje | pominięte | exclusive gorszy w pomiarze, AVX2 zbędne (CPU 1,5%) |
+| M1 pamięć w tle | zrobione | tray z działającym filtrem: 2,8 MB (cel 40 MB), okno niszczone razem z OpenGL |
+| M2 dwa procesy | niepotrzebne | tray ma już ~3 MB |
+| M3 okno poniżej 40 MB | nie zrobione | wymaga renderera programowego (raylib 5.5 go nie ma); okno otwarte ~91 MB |
+| M4 rysowanie | zrobione | 60 kl./s z fokusem, 20 bez fokusu / kompakt, 10 zminimalizowane |
+| F1–F10 | zrobione | F9 (CI) napisane, nieuruchomione; F10 (AEC) jako beta; skrót klawiszowy przez odpytywanie klawiatury (nie `RegisterHotKey`, klawisz nadal trafia do aplikacji) |
+| D0–D5 sterownik | nie zrobione | wymaga WDK i maszyny wirtualnej; gotowy protokół pamięci współdzielonej (`vmic_shm`) i opis w `driver/README.md` |
+
+Liczby: `docs/MEASUREMENTS.md`.
