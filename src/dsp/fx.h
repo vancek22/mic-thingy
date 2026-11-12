@@ -24,6 +24,7 @@ typedef struct FxParamInfo {
     const char *name;        /* console name, lowercase, no spaces */
     const char *unit;        /* "dB", "ms", "Hz", "" */
     float min, max, def;
+    int toggle;              /* 1 = on/off switch (0/1), shown as a checkbox */
 } FxParamInfo;
 
 typedef struct Fx Fx;

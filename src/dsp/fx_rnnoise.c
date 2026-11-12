@@ -11,9 +11,9 @@
 static const FxParamInfo k_params[] = {
     /* dry/wet mix. 0.95 keeps a -26 dB dry floor: fricative onsets that RNNoise
      * mistakes for noise lose ~10 dB instead of vanishing (see tools/run_audio_tests). */
-    { "wet", "", 0.0f, 1.0f, 0.95f },
+    { "wet", "", 0.0f, 1.0f, 0.95f, 0 },
     /* 0/1, see third_party/rnnoise/PATCHES.md. Default 0: -10 ms for ~0.6 dB SDR. */
-    { "lookahead", "", 0.0f, 1.0f, 0.0f },
+    { "lookahead", "", 0.0f, 1.0f, 0.0f, 1 },
 };
 
 typedef struct {

@@ -4,11 +4,13 @@
 #include <math.h>
 #include <string.h>
 #include "dsp/dsp_util.h"
+#include "util/ringbuf.h"
 
 void pipeline_init(Pipeline *p)
 {
     memset(p->fx, 0, sizeof p->fx);
     p->count = 0;
+    p->meter_ring = NULL;
     atomic_init(&p->bypass_all, 0);
     atomic_init(&p->peak_in, 0.0f);
     atomic_init(&p->peak_out, 0.0f);
@@ -153,4 +155,17 @@ void pipeline_process(Pipeline *p, float *buf)
     atomic_store_explicit(&p->vad, ctx.vad_valid ? ctx.vad_prob : 0.0f, memory_order_relaxed);
     atomic_store_explicit(&p->gate_gain, ctx.gate_gain, memory_order_relaxed);
     atomic_store_explicit(&p->comp_gr_db, ctx.comp_gr_db, memory_order_relaxed);
+
+    if (p->meter_ring) {
+        float rms = 0.0f;
+        for (int i = 0; i < VF_FRAME_SIZE; i++) rms += buf[i] * buf[i];
+        float m[VF_METER_FIELDS];
+        m[VF_M_PEAK_IN] = atomic_load_explicit(&p->peak_in, memory_order_relaxed);
+        m[VF_M_PEAK_OUT] = atomic_load_explicit(&p->peak_out, memory_order_relaxed);
+        m[VF_M_RMS_OUT] = sqrtf(rms / VF_FRAME_SIZE);
+        m[VF_M_VAD] = ctx.vad_valid ? ctx.vad_prob : 0.0f;
+        m[VF_M_GATE] = ctx.gate_gain;
+        m[VF_M_GR] = ctx.comp_gr_db;
+        vf_ring_write(p->meter_ring, m, VF_METER_FIELDS);   /* dropped if the UI lags */
+    }
 }

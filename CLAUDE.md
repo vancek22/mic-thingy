@@ -88,5 +88,16 @@ RNNoise has no upstream CMake: built by our own target using the portable (non-x
    E2E test (Windows, plays into CABLE): `voicefilter-cli --in-file mix.wav --vmic --seconds 11` while
    `vf-record --in "CABLE Output" --seconds 9 rec.wav`, then `vf-eval match offline.wav rec.wav`
    (2026-11-12: r = 1.00000, gain 0.00 dB, residual -88.8 dB, 0 underruns).
-4. GUI (raylib + raygui).
+4. [done] GUI `voicefilter` (`src/main_gui.c`, raylib 5.5 + raygui 4.0, Polish UI). Device dropdowns, output mode
+   (headphones / virtual mic / virtual mic + monitor), Start/Stop (auto-restart on device change), global bypass,
+   one panel per effect built from `Fx.params` (sliders; `toggle` params as checkboxes; "Domyślne" reset),
+   meters fed by the lock-free meter ring (`Pipeline.meter_ring`, `VF_METER_FIELDS` floats per frame): in/out
+   peak + hold, VAD with gate-threshold marker, gate opening, compressor GR, latency estimate, xruns.
+   Start/stop logic shared with the CLI in `src/app/session.c` (`VfSession`).
+   raylib is built WITHOUT raudio (`SUPPORT_MODULE_RAUDIO=OFF`): its embedded miniaudio would clash with ours.
+   raygui gotcha: call `GuiLoadStyleDefault()` BEFORE `GuiSetFont()` - it unloads the previous font's texture.
+   Font: Segoe UI (Windows) / DejaVu or Noto (Linux) with Latin Ext-A for Polish, fallback raylib default.
+   Visual check: `build\voicefilter --autostart --mode 1 --in-file mix.wav --screenshot shot.png --frames 150`
+   (writes shot.png into the working directory and quits; `--verbose` = raylib log).
+   Linux GUI deps: `libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`.
 5. INI settings, presets, autostart.

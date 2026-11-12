@@ -58,7 +58,8 @@ add_library(vfcore STATIC
   src/util/cmdline.c
   src/util/console.c
   src/util/ringbuf.c
-  src/util/wavio.c)
+  src/util/wavio.c
+  src/app/session.c)
 target_include_directories(vfcore PUBLIC src)
 target_link_libraries(vfcore PUBLIC rnnoise miniaudio)
 
@@ -86,6 +87,33 @@ add_executable(voicefilter-cli src/main_cli.c)
 target_link_libraries(voicefilter-cli PRIVATE vfcore)
 if(NOT MSVC)
   target_compile_options(voicefilter-cli PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# ---------------------------------------------------------------- GUI (raylib + raygui)
+option(VF_GUI "Build the raylib GUI (voicefilter)" ON)
+if(VF_GUI)
+  # raylib without its audio module: raudio embeds its own miniaudio, which would
+  # clash with ours, and VoiceFilter does all audio itself.
+  set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
+  set(CUSTOMIZE_BUILD ON CACHE BOOL "" FORCE)
+  set(SUPPORT_MODULE_RAUDIO OFF CACHE BOOL "" FORCE)
+  set(USE_AUDIO OFF CACHE BOOL "" FORCE)
+  add_subdirectory(third_party/raylib EXCLUDE_FROM_ALL)
+  if(TARGET raylib)
+    target_compile_options(raylib PRIVATE -w)
+  endif()
+  add_executable(voicefilter src/main_gui.c)
+  target_include_directories(voicefilter PRIVATE third_party/raygui)
+  target_link_libraries(voicefilter PRIVATE vfcore raylib)
+  if(WIN32)
+    set_target_properties(voicefilter PROPERTIES WIN32_EXECUTABLE ON)   # no console window
+  endif()
+  if(NOT MSVC)
+    # raygui itself triggers a few warnings; keep our own code strict elsewhere.
+    target_compile_options(voicefilter PRIVATE -Wall -Wno-unused-function -Wno-unused-parameter
+                                               -Wno-unused-but-set-variable)
+  endif()
 endif()
 
 # ---------------------------------------------------------------- tests

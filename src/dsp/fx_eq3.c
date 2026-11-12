@@ -6,13 +6,13 @@
 #include "dsp/dsp_util.h"
 
 static const FxParamInfo k_params[] = {
-    { "low",      "dB", -12.0f, 12.0f,   0.0f },
-    { "mid",      "dB", -12.0f, 12.0f,   0.0f },
-    { "high",     "dB", -12.0f, 12.0f,   0.0f },
-    { "lowfreq",  "Hz", 50.0f,  500.0f,  120.0f },
-    { "midfreq",  "Hz", 200.0f, 5000.0f, 1500.0f },
-    { "midq",     "",   0.3f,   4.0f,    1.0f },
-    { "highfreq", "Hz", 2000.0f, 12000.0f, 6000.0f },
+    { "low",      "dB", -12.0f, 12.0f,   0.0f, 0 },
+    { "mid",      "dB", -12.0f, 12.0f,   0.0f, 0 },
+    { "high",     "dB", -12.0f, 12.0f,   0.0f, 0 },
+    { "lowfreq",  "Hz", 50.0f,  500.0f,  120.0f, 0 },
+    { "midfreq",  "Hz", 200.0f, 5000.0f, 1500.0f, 0 },
+    { "midq",     "",   0.3f,   4.0f,    1.0f, 0 },
+    { "highfreq", "Hz", 2000.0f, 12000.0f, 6000.0f, 0 },
 };
 
 typedef struct {

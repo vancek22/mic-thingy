@@ -18,7 +18,12 @@ typedef struct Pipeline {
 
     /* Meters, written by the audio thread, read (relaxed) by the UI. */
     _Atomic float peak_in, peak_out, vad, gate_gain, comp_gr_db;
+    /* Optional per-frame meter stream for the GUI (lock-free SPSC, audio -> UI):
+     * VF_METER_FIELDS floats per 10 ms frame, see VfMeterField. NULL = off. */
+    struct VfRing *meter_ring;
 } Pipeline;
+
+enum VfMeterField { VF_M_PEAK_IN, VF_M_PEAK_OUT, VF_M_RMS_OUT, VF_M_VAD, VF_M_GATE, VF_M_GR, VF_METER_FIELDS };
 
 void pipeline_init(Pipeline *p);
 int  pipeline_add(Pipeline *p, Fx *fx);             /* before audio starts */

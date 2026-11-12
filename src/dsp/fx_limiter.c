@@ -5,8 +5,8 @@
 #include "dsp/dsp_util.h"
 
 static const FxParamInfo k_params[] = {
-    { "ceiling", "dB", -12.0f, 0.0f,    -1.0f },
-    { "release", "ms", 5.0f,   1000.0f, 60.0f },
+    { "ceiling", "dB", -12.0f, 0.0f,    -1.0f, 0 },
+    { "release", "ms", 5.0f,   1000.0f, 60.0f, 0 },
 };
 
 #define D     LIMITER_LOOKAHEAD

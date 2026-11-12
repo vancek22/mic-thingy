@@ -6,7 +6,7 @@
 #include "dsp/dsp_util.h"
 
 static const FxParamInfo k_params[] = {
-    { "freq", "Hz", 20.0f, 300.0f, 80.0f },
+    { "freq", "Hz", 20.0f, 300.0f, 80.0f, 0 },
 };
 
 /* 4th-order Butterworth = two cascaded sections with these Q values. */

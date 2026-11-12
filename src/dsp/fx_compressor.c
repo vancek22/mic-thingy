@@ -5,12 +5,12 @@
 #include "dsp/dsp_util.h"
 
 static const FxParamInfo k_params[] = {
-    { "threshold", "dB", -60.0f, 0.0f,    -20.0f },
-    { "ratio",     "",   1.0f,   20.0f,   3.0f },
-    { "attack",    "ms", 0.1f,   200.0f,  8.0f },
-    { "release",   "ms", 10.0f,  2000.0f, 150.0f },
-    { "makeup",    "dB", 0.0f,   24.0f,   3.0f },
-    { "knee",      "dB", 0.0f,   24.0f,   6.0f },
+    { "threshold", "dB", -60.0f, 0.0f,    -20.0f, 0 },
+    { "ratio",     "",   1.0f,   20.0f,   3.0f, 0 },
+    { "attack",    "ms", 0.1f,   200.0f,  8.0f, 0 },
+    { "release",   "ms", 10.0f,  2000.0f, 150.0f, 0 },
+    { "makeup",    "dB", 0.0f,   24.0f,   3.0f, 0 },
+    { "knee",      "dB", 0.0f,   24.0f,   6.0f, 0 },
 };
 
 #define DETECTOR_RELEASE_MS 20.0f   /* peak detector fall time (fixed) */

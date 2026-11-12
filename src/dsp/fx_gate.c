@@ -5,11 +5,11 @@
 #include "dsp/dsp_util.h"
 
 static const FxParamInfo k_params[] = {
-    { "threshold", "",   0.0f,  1.0f,    0.5f },
-    { "hold",      "ms", 0.0f,  1000.0f, 150.0f },
-    { "attack",    "ms", 0.1f,  50.0f,   3.0f },
-    { "release",   "ms", 5.0f,  1000.0f, 100.0f },
-    { "floor",     "dB", -90.0f, 0.0f,   -50.0f },
+    { "threshold", "",   0.0f,  1.0f,    0.5f, 0 },
+    { "hold",      "ms", 0.0f,  1000.0f, 150.0f, 0 },
+    { "attack",    "ms", 0.1f,  50.0f,   3.0f, 0 },
+    { "release",   "ms", 5.0f,  1000.0f, 100.0f, 0 },
+    { "floor",     "dB", -90.0f, 0.0f,   -50.0f, 0 },
 };
 
 typedef struct {
