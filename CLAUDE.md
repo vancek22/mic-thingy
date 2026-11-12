@@ -163,7 +163,11 @@ RNNoise has no upstream CMake: built by our own target using the portable (non-x
    - Git history was rewritten so author/committer is "mic thingy dev <mic-thingy@users.noreply.github.com>" and
      contains no personal e-mail or local user paths. Never commit personal data (e-mails, user names in paths,
      device names in screenshots - use `mic-thingy --demo` for public screenshots; assets/screenshot.png was made so).
-   - Logo (after the user's sketch): bevelled frame with green + white bands top/left, navy screen, tilted handheld
-     mic with slots, green status LED, mesh grille and a cable. Also drawn in the GUI header (36 px).
+   - Logo (after the user's sketch, in the GUI palette): bevelled frame with a green accent band + silver band
+     top/left and graphite shadow sides, dark LCD screen with grid + scanlines, tilted slate handheld mic with slots,
+     glowing green LED, green accent ring, mesh grille and cable, plus a small LED level meter. "Off" variant
+     (tray while stopped): burgundy band/LED, dark meter. Below 40 px (`detail` = 0) grid/scanlines/meter are
+     dropped and the mic gets a neon rim + lighter body so it reads on the dark screen; the GUI header renders
+     the logo at its display size (36 px) for that reason.
      Hi-res renders: assets/logo-1024.png, assets/logo-256.png (make_icon writes any <name>-<size>.png).
    - Not published anywhere yet (the user chose "prepare only").

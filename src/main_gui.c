@@ -453,11 +453,10 @@ int main(int argc, char **argv)
         SetWindowIcon(icon);
         vf_window_style_titlebar(GetWindowHandle(), 0x3A445C, 0xDCE6F5, 0x2A3140);
     }
-    static unsigned char logo_px[128 * 128 * 4];      /* header logo, drawn at 36 px */
-    vf_icon_render(logo_px, 128, 1);
-    Texture2D logo_tex = LoadTextureFromImage((Image){ logo_px, 128, 128, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 });
-    GenTextureMipmaps(&logo_tex);
-    SetTextureFilter(logo_tex, TEXTURE_FILTER_TRILINEAR);
+    /* header logo rendered at its display size (36 px) so it gets the icon-size variant */
+    static unsigned char logo_px[36 * 36 * 4];
+    vf_icon_render(logo_px, 36, 1);
+    Texture2D logo_tex = LoadTextureFromImage((Image){ logo_px, 36, 36, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 });
     if (vf_autostart_migrate()) autostart_on = 1;   /* old "VoiceFilter" entry -> this exe */
     load_fonts();
     apply_style();
