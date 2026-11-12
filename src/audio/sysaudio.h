@@ -12,8 +12,9 @@
 
 typedef struct VfSysAudio {
     ma_device dev;
-    VfSink sink;
-    int sink_ready;
+    VfSink sink;               /* the mix bus reads this */
+    VfSink ref;                /* the echo canceller reads this (same data, own consumer) */
+    int sink_ready, ref_ready;
     atomic_int running;
 } VfSysAudio;
 

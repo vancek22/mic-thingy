@@ -4,6 +4,7 @@
 #include <math.h>
 #include <string.h>
 #include "audio/vmic.h"
+#include "dsp/fx_aec.h"
 
 #define METER_RING 4096      /* floats: ~680 ms of meter frames */
 
@@ -34,6 +35,7 @@ int vf_session_init(VfSession *s, int with_meters)
         snprintf(s->error, sizeof s->error, "Effect chain initialisation failed.");
         return -1;
     }
+    if (s->sys.ref_ready) fx_aec_attach(&s->chain.aec, &s->sys.ref);
     if (with_meters) {
         if (vf_ring_init(&s->meters, METER_RING) != 0) return -1;
         s->pipe.meter_ring = &s->meters;

@@ -1,5 +1,6 @@
 #include "dsp/chain.h"
 
+#include "dsp/fx_aec.h"
 #include "dsp/fx_agc.h"
 #include "dsp/fx_breath.h"
 #include "dsp/fx_compressor.h"
@@ -18,6 +19,7 @@
 int chain_build(Chain *c, Pipeline *p)
 {
     fx_highpass_make(&c->highpass);
+    fx_aec_make(&c->aec);
     fx_hum_make(&c->hum);
     fx_rnnoise_make(&c->rnnoise);
     fx_dereverb_make(&c->dereverb);
@@ -31,7 +33,7 @@ int chain_build(Chain *c, Pipeline *p)
     fx_warmth_make(&c->warmth);
     fx_voice_make(&c->voice);
     fx_limiter_make(&c->limiter);
-    Fx *order[] = { &c->highpass, &c->hum, &c->rnnoise, &c->dereverb, &c->gate, &c->breath, &c->guard,
+    Fx *order[] = { &c->highpass, &c->aec, &c->hum, &c->rnnoise, &c->dereverb, &c->gate, &c->breath, &c->guard,
                     &c->agc, &c->comp, &c->deesser, &c->eq, &c->warmth, &c->voice, &c->limiter };
     for (unsigned i = 0; i < sizeof order / sizeof order[0]; i++)
         if (pipeline_add(p, order[i]) != 0) return -1;

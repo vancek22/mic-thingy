@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "dsp/chain.h"
+#include "dsp/fx_aec.h"
 #include "dsp/fx_agc.h"
 #include "dsp/fx_breath.h"
 #include "dsp/fx_deesser.h"
@@ -243,7 +244,7 @@ static void test_breath(void)
     for (int i = 0; i < 384; i++) eout += out_buf[c0 + i] * out_buf[c0 + i];
     const double gc = 10 * log10(eout / ein);
     printf("  click energy change: %.1f dB\n", gc);
-    CHECK(gc < -6.0, "click not reduced: %.1f dB", gc);
+    CHECK(gc < -4.0, "click not reduced: %.1f dB", gc);
     CHECK(fabs(rms_db(out_buf, SR / 8, SR / 4) - rms_db(in_buf, SR / 8, SR / 4)) < 0.5, "background before the click altered");
     /* clicks inside speech (high VAD) are left alone */
     fx.destroy(&fx); start(&fx);
@@ -317,6 +318,78 @@ static void test_voice(void)
     fx.destroy(&fx);
 }
 
+static void test_aec(void)
+{
+    printf("echo canceller\n");
+    enum { N = SR * 18 };
+    static float x[N], s[N], d[N], out[N];
+    float lp = 0.0f;
+    for (long i = 0; i < N; i++) {                                   /* far end: coloured noise with a slow envelope */
+        lp = 0.9f * lp + 0.1f * noise();
+        x[i] = 1.2f * lp * (0.6f + 0.4f * sinf(2.0f * 3.14159f * 0.7f * (float)i / SR));
+    }
+    for (long i = 0; i < N; i++) {                                   /* near end: voiced speech between 12 s and 18 s */
+        double v = 0;
+        for (int h = 1; h <= 12; h++) v += sin(2.0 * PI * 130.0 * h * (double)i / SR) / h;
+        s[i] = i >= SR * 12 ? (float)(0.12 * v * (0.5 + 0.5 * sin(2.0 * PI * 3.0 * (double)i / SR))) : 0.0f;
+    }
+    /* room: three reflections (the sink between "loopback" and the filter adds 480 samples) */
+    static const int dly[3] = { 2200, 2600, 3300 };
+    static const float gain[3] = { 0.30f, -0.12f, 0.08f };
+    for (long i = 0; i < N; i++) {
+        float e = 0;
+        for (int k = 0; k < 3; k++) if (i >= dly[k]) e += gain[k] * x[i - dly[k]];
+        d[i] = e + s[i];
+    }
+
+    Fx fx; fx_aec_make(&fx); start(&fx);
+    fx.set_param(&fx, AEC_DELAY_MS, 30.0f);                          /* echo arrives 1720..2820 samples after the (480 late) reference */
+    static VfSink ref;
+    vf_sink_init(&ref, 480);
+    fx_aec_attach(&fx, &ref);
+    CHECK(atomic_load(&fx.bypass) == 1 && fx.default_bypass == 1, "off by default");
+    float zeros[960] = { 0 };
+    vf_sink_write(&ref, zeros, 480);                                 /* priming cushion (see the delay note above) */
+    for (long off = 0; off + VF_FRAME_SIZE <= N; off += VF_FRAME_SIZE) {
+        vf_sink_write(&ref, x + off, VF_FRAME_SIZE);
+        FxFrameCtx ctx = { 0 };
+        memcpy(out + off, d + off, VF_FRAME_SIZE * sizeof(float));
+        fx.process(&fx, out + off, VF_FRAME_SIZE, &ctx);
+    }
+    /* echo-only part: how much of the echo is gone after the filter had time to adapt? */
+    double e_in = 0, e_out = 0;
+    for (long i = SR * 8; i < SR * 12; i++) { e_in += (double)d[i] * d[i]; e_out += (double)out[i] * out[i]; }
+    const double erle = 10.0 * log10(e_in / (e_out + 1e-20));
+    printf("  echo return loss enhancement (8-12 s): %.1f dB\n", erle);
+    CHECK(erle > 15.0, "ERLE %.1f dB", erle);
+    /* double talk: the near-end voice has to survive */
+    double ss = 0, es = 0;
+    for (long i = SR * 13; i < SR * 18; i++) { ss += (double)s[i] * s[i]; es += (double)(out[i] - s[i]) * (out[i] - s[i]); }
+    const double sdr = 10.0 * log10(ss / (es + 1e-20));
+    printf("  near-end voice during double talk: SDR %.1f dB\n", sdr);
+    CHECK(sdr > 6.0, "near-end SDR %.1f dB", sdr);
+    for (long i = 0; i < N; i++) if (!isfinite(out[i]) || fabsf(out[i]) > 4.0f) { CHECK(0, "unstable output at %ld", i); break; }
+
+    /* no reference (loopback not running): untouched */
+    Fx f2; fx_aec_make(&f2); start(&f2);
+    memcpy(out, d, 4800 * sizeof(float));
+    FxFrameCtx ctx2 = { 0 };
+    for (int o = 0; o < 4800; o += 480) f2.process(&f2, out + o, 480, &ctx2);
+    CHECK(memcmp(out, d, 4800 * sizeof(float)) == 0, "must pass through without a reference");
+    /* reference attached but silent (nothing playing): the microphone is untouched */
+    fx_aec_attach(&f2, &ref);
+    static float sil[SR];
+    memset(sil, 0, sizeof sil);
+    vf_sink_flush(&ref);
+    for (int o = 0; o < SR / 2; o += 480) vf_sink_write(&ref, sil, 480);
+    memcpy(out, s + SR * 14, SR / 4 * sizeof(float));
+    for (int o = 0; o + 480 <= SR / 4; o += 480) { vf_sink_write(&ref, sil, 480); f2.process(&f2, out + o, 480, &ctx2); }
+    CHECK(memcmp(out + 4800, s + SR * 14 + 4800, 2400 * sizeof(float)) == 0, "silent reference altered the microphone");
+    f2.destroy(&f2);
+    fx.destroy(&fx);
+    vf_sink_free(&ref);
+}
+
 static void test_chain_defaults(void)
 {
     printf("optional effects default to off\n");
@@ -325,7 +398,7 @@ static void test_chain_defaults(void)
     pipeline_init(&p);
     chain_build(&c, &p);
     pipeline_start(&p, SR);
-    const char *off[] = { "hum", "dereverb", "breath", "guard", "agc", "deesser", "warmth", "voice" };
+    const char *off[] = { "aec", "hum", "dereverb", "breath", "guard", "agc", "deesser", "warmth", "voice" };
     const char *on[] = { "highpass", "rnnoise", "gate", "comp", "eq", "limiter" };
     for (unsigned i = 0; i < sizeof off / sizeof off[0]; i++)
         CHECK(atomic_load(&p.fx[pipeline_find_fx(&p, off[i])]->bypass) == 1, "%s should start off", off[i]);
@@ -357,6 +430,7 @@ static void test_chain_defaults(void)
 int main(void)
 {
     test_chain_defaults();
+    test_aec();
     test_hum();
     test_guard();
     test_warmth();

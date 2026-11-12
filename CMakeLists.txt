@@ -58,6 +58,7 @@ add_library(vfcore STATIC
   src/dsp/fx_breath.c
   src/dsp/fx_dereverb.c
   src/dsp/fx_voice.c
+  src/dsp/fx_aec.c
   src/dsp/chain.c
   src/dsp/pipeline.c
   src/dsp/spectrum.c

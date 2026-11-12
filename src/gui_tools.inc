@@ -672,12 +672,15 @@ static void ui_tick(VfSession *s, double now, int running_window, UiLink *L)
     atomic_store(&s->mix_board.gain, db_to_lin_f(st->board_gain_db));
     atomic_store(&s->mix_sys.gain, db_to_lin_f(st->sys_gain_db));
     atomic_store(&s->mix_sys.duck, db_to_lin_f(st->sys_duck_db));
-    if (st->sys_enabled && !U.sys_running && now >= U.sys_retry) {
+    const int aec_on = !atomic_load(&s->chain.aec.bypass);
+    const int want_sys = st->sys_enabled || aec_on;               /* the echo canceller needs the loopback too */
+    if (!st->sys_enabled) atomic_store(&s->mix_sys.gain, 0.0f);
+    if (want_sys && !U.sys_running && now >= U.sys_retry) {
         int idx = -1;
         for (int i = 0; i < s->plays.count; i++) if (st->sys_device[0] && !strcmp(s->plays.dev[i].name, st->sys_device)) idx = i;
         U.sys_running = vf_session_sys_start(s, idx) == 0;
         if (!U.sys_running) U.sys_retry = now + 5.0;
-    } else if (!st->sys_enabled && U.sys_running) { vf_session_sys_stop(s); U.sys_running = 0; }
+    } else if (!want_sys && U.sys_running) { vf_session_sys_stop(s); U.sys_running = 0; }
 
     /* once a second: statistics */
     if (now >= U.next_second) {
