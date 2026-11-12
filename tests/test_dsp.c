@@ -4,7 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "audio/engine.h"
 #include "dsp/chain.h"
+#include "dsp/fx_rnnoise.h"
 #include "dsp/fx_compressor.h"
 #include "dsp/fx_eq3.h"
 #include "dsp/fx_gate.h"
@@ -226,8 +228,184 @@ static void test_pipeline(void)
     pipeline_stop(&p);
 }
 
+/* Speech-like test signal: 140 Hz pulse train (glottal-ish) with a syllable
+ * envelope plus a little noise; deterministic. */
+static void speechish(float *x, long n)
+{
+    unsigned s = 12345;
+    for (long i = 0; i < n; i++) {
+        double t = (double)i / SR;
+        double env = 0.5 + 0.5 * sin(2.0 * PI * 4.0 * t);
+        double v = 0;
+        for (int h = 1; h <= 20; h++) v += sin(2.0 * PI * 140.0 * h * t) / h;
+        s = s * 1103515245u + 12345u;
+        double nz = ((s >> 16) & 0x7fff) / 32768.0 - 0.5;
+        x[i] = (float)(0.15 * env * v + 0.01 * nz);
+    }
+}
+
+/* Lag (0..maxlag) maximising normalised correlation of y against x. */
+static long best_lag(const float *x, const float *y, long n, long maxlag, double *corr)
+{
+    long best = 0;
+    double bc = -2;
+    for (long lag = 0; lag <= maxlag; lag++) {
+        double c = 0, ex = 0, ey = 0;
+        for (long i = SR / 2; i < n - maxlag; i++) {
+            c += (double)x[i] * y[i + lag]; ex += (double)x[i] * x[i]; ey += (double)y[i + lag] * y[i + lag];
+        }
+        c /= sqrt(ex * ey + 1e-30);
+        if (c > bc) { bc = c; best = lag; }
+    }
+    *corr = bc;
+    return best;
+}
+
+#define LAT_N (SR * 2)
+
+static void run_fx_on(Fx *fx, const float *in, float *out, long n)
+{
+    FxFrameCtx ctx;
+    for (long off = 0; off + VF_FRAME_SIZE <= n; off += VF_FRAME_SIZE) {
+        memset(&ctx, 0, sizeof ctx);
+        memcpy(out + off, in + off, VF_FRAME_SIZE * sizeof *out);
+        fx->process(fx, out + off, VF_FRAME_SIZE, &ctx);
+    }
+}
+
+static void test_rnnoise_delay(void)
+{
+    printf("rnnoise delay / dry-wet\n");
+    static float in[LAT_N], out[LAT_N];
+    speechish(in, LAT_N);
+    Fx fx; fx_rnnoise_make(&fx); start(&fx);
+    run_fx_on(&fx, in, out, LAT_N);
+    double r;
+    long lag = best_lag(in, out, LAT_N, 1500, &r);
+    printf("  rnnoise delay = %ld samples (%.1f ms), corr %.2f\n", lag, 1000.0 * lag / SR, r);
+    /* +-3: RNNoise's internal DC-blocking high-pass shifts the correlation peak slightly */
+    CHECK(labs(lag - RNNOISE_DELAY_SAMPLES) <= 3, "RNNOISE_DELAY_SAMPLES (%d) does not match measured %ld",
+          RNNOISE_DELAY_SAMPLES, lag);
+
+    /* wet 0.5 must not comb-filter: the dry path has to be delayed by the same amount,
+     * so the output correlates with the input at ONE lag only. */
+    fx.destroy(&fx); start(&fx);
+    fx.set_param(&fx, RNNOISE_PARAM_WET, 0.5f);
+    run_fx_on(&fx, in, out, LAT_N);
+    double r0, r1;
+    long l = best_lag(in, out, LAT_N, 1500, &r1);
+    best_lag(in, out + l, LAT_N - l, 0, &r0);
+    CHECK(labs(l - RNNOISE_DELAY_SAMPLES) <= 3, "wet 0.5: main lag %ld", l);
+    double c0 = 0, e0 = 0, e1 = 0;                     /* correlation at lag 0 when l != 0 */
+    for (long i = SR / 2; i < LAT_N - 1500; i++) {
+        c0 += (double)in[i] * out[i]; e0 += (double)in[i] * in[i]; e1 += (double)out[i] * out[i];
+    }
+    double zc = c0 / sqrt(e0 * e1 + 1e-30);
+    CHECK(l == 0 || fabs(zc) < 0.5 * r1, "wet 0.5 has a second (undelayed) path, corr %.2f vs %.2f", zc, r1);
+
+    /* wet 0 = pure (delayed) dry signal, bit-exact apart from the delay */
+    fx.destroy(&fx); start(&fx);
+    fx.set_param(&fx, RNNOISE_PARAM_WET, 0.0f);
+    run_fx_on(&fx, in, out, LAT_N);
+    float maxerr = 0;
+    for (long i = RNNOISE_DELAY_SAMPLES; i < LAT_N - VF_FRAME_SIZE; i++) {
+        float e = fabsf(out[i] - in[i - RNNOISE_DELAY_SAMPLES]);
+        if (e > maxerr) maxerr = e;
+    }
+    CHECK(maxerr < 1e-6f, "wet 0 should be the delayed input, max err %g", (double)maxerr);
+    fx.destroy(&fx);
+}
+
+static void test_chain_delay(void)
+{
+    printf("chain delay\n");
+    static float in[LAT_N], out[LAT_N];
+    static Chain chain;
+    static Pipeline p;
+    speechish(in, LAT_N);
+    pipeline_init(&p);
+    chain_build(&chain, &p);
+    pipeline_start(&p, SR);
+    /* measure pure delay: disable the nonlinear and phase-shifting (IIR) stages */
+    FILE *sink = tmpfile();
+    vf_cmd_execute(&p, "bypass gate on", sink);
+    vf_cmd_execute(&p, "bypass comp on", sink);
+    vf_cmd_execute(&p, "bypass highpass on", sink);
+    vf_cmd_execute(&p, "bypass eq on", sink);
+    if (sink) fclose(sink);
+    memcpy(out, in, sizeof in);
+    for (long off = 0; off + VF_FRAME_SIZE <= LAT_N; off += VF_FRAME_SIZE)
+        pipeline_process(&p, out + off);
+    double r;
+    long lag = best_lag(in, out, LAT_N, 2000, &r);
+    long expect = RNNOISE_DELAY_SAMPLES + LIMITER_LOOKAHEAD;
+    printf("  chain delay = %ld samples (%.1f ms), corr %.2f\n", lag, 1000.0 * lag / SR, r);
+    CHECK(labs(lag - expect) <= 3, "chain delay %ld, expected ~%ld", lag, expect);
+    CHECK(pipeline_delay_samples(&p) == expect, "pipeline_delay_samples %d", pipeline_delay_samples(&p));
+    pipeline_stop(&p);
+}
+
+/* The engine's FIFO re-chunking must give the same samples as running the
+ * pipeline directly, for any callback block size, with no underruns. */
+static void test_engine_blocks(void)
+{
+    printf("engine re-chunking\n");
+    const unsigned sizes[] = { 480, 441, 448, 512, 128, 1024, 0 /* random */ };
+    static float in[LAT_N], ref[LAT_N], out[LAT_N];
+    speechish(in, LAT_N);
+
+    for (unsigned si = 0; si < sizeof sizes / sizeof sizes[0]; si++) {
+        static Chain c1, c2;
+        static Pipeline p1, p2;
+        static Engine e;
+        pipeline_init(&p1); chain_build(&c1, &p1); pipeline_start(&p1, SR);
+        pipeline_init(&p2); chain_build(&c2, &p2); pipeline_start(&p2, SR);
+
+        memcpy(ref, in, sizeof in);
+        for (long off = 0; off + VF_FRAME_SIZE <= LAT_N; off += VF_FRAME_SIZE)
+            pipeline_process(&p1, ref + off);
+
+        engine_init_offline(&e, &p2);
+        unsigned seed = 99;
+        long pos = 0;
+        while (pos < LAT_N) {
+            unsigned b = sizes[si];
+            if (b == 0) { seed = seed * 1103515245u + 12345u; b = 32 + (seed >> 16) % 1000; }
+            if (pos + (long)b > LAT_N) b = (unsigned)(LAT_N - pos);
+            engine_process_block(&e, out + pos, in + pos, b);
+            pos += b;
+        }
+        /* output = ref delayed by a constant (FIFO priming); find it */
+        long shift = -1;
+        for (long s = 0; s <= VF_FRAME_SIZE * 2 && shift < 0; s++) {
+            int ok = 1;
+            for (long i = 0; i < 2000 && ok; i++)
+                if (out[SR / 2 + i + s] != ref[SR / 2 + i]) ok = 0;
+            if (ok) shift = s;
+        }
+        int mism = 0;
+        if (shift >= 0)
+            for (long i = SR / 2; i + shift < LAT_N - VF_FRAME_SIZE; i++)
+                if (out[i + shift] != ref[i]) mism++;
+        unsigned ur = atomic_load(&e.underruns), orun = atomic_load(&e.overruns);
+        printf("  block %4u: fifo shift %ld samples, mismatches %d, underruns %u, overruns %u\n",
+               sizes[si], shift, mism, ur, orun);
+        CHECK(shift >= 0 && mism == 0, "block %u: output is not the delayed pipeline output", sizes[si]);
+        /* fixed block sizes: never starve. Random sizes: one-off settling only. */
+        unsigned allowed = sizes[si] ? 0 : VF_FRAME_SIZE;
+        CHECK(ur <= allowed && orun == 0, "block %u: underruns %u overruns %u", sizes[si], ur, orun);
+        if (sizes[si])
+            CHECK(shift == e.prime_samples, "block %u: delay %ld != prime %d", sizes[si], shift, e.prime_samples);
+        pipeline_stop(&p1);
+        pipeline_stop(&p2);
+    }
+}
+
 int main(void)
 {
+    test_rnnoise_delay();
+    test_chain_delay();
+    test_engine_blocks();
     test_highpass();
     test_gate();
     test_compressor();

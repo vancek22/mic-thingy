@@ -54,7 +54,8 @@ add_library(vfcore STATIC
   src/audio/engine.c
   src/audio/devices.c
   src/util/cmdline.c
-  src/util/console.c)
+  src/util/console.c
+  src/util/wavio.c)
 target_include_directories(vfcore PUBLIC src)
 target_link_libraries(vfcore PUBLIC rnnoise miniaudio)
 if(MSVC)
@@ -78,3 +79,14 @@ if(NOT MSVC)
   target_compile_options(test_dsp PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 add_test(NAME dsp COMMAND test_dsp)
+
+# ---------------------------------------------------------------- offline tools
+add_executable(voicefilter-file tools/vf_file.c)
+target_link_libraries(voicefilter-file PRIVATE vfcore)
+add_executable(vf-eval tools/vf_eval.c)
+target_link_libraries(vf-eval PRIVATE vfcore)
+foreach(t voicefilter-file vf-eval)
+  if(NOT MSVC)
+    target_compile_options(${t} PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+endforeach()

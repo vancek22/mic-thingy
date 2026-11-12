@@ -9,12 +9,8 @@
 
 /* ---- audio thread: no malloc, no locks, no I/O below this line's callback ---- */
 
-static void data_callback(ma_device *dev, void *output, const void *input, ma_uint32 frames)
+void engine_process_block(Engine *e, float *out, const float *in, unsigned frames)
 {
-    Engine *e = (Engine *)dev->pUserData;
-    float *out = (float *)output;
-    const float *in = (const float *)input;
-
 #ifdef VF_HAVE_SSE
     if (!e->ftz_set) {                       /* flush denormals: stable CPU load */
         _mm_setcsr(_mm_getcsr() | 0x8040);   /* FTZ | DAZ */
@@ -22,8 +18,22 @@ static void data_callback(ma_device *dev, void *output, const void *input, ma_ui
     }
 #endif
 
+    /* First callback: pre-fill the output FIFO with the minimum silence that
+     * keeps a constant block size B from ever starving: 480 - gcd(B, 480).
+     * (0 for B = 480 or 240-multiples of it, up to 479 otherwise.) If block sizes
+     * vary later, a starved callback outputs silence without consuming, which
+     * raises the buffer level permanently - a one-off glitch, then stable. */
+    if (!e->started) {
+        unsigned a = frames, b = VF_FRAME_SIZE;
+        while (b) { unsigned t = a % b; a = b; b = t; }
+        e->prime_samples = a ? VF_FRAME_SIZE - (int)a : 0;
+        e->out_head = 0;
+        e->out_count = e->prime_samples;      /* out_fifo is zeroed at init */
+        e->started = 1;
+    }
+
     /* 1) capture -> accumulator -> pipeline -> output FIFO */
-    for (ma_uint32 i = 0; i < frames; i++) {
+    for (unsigned i = 0; i < frames; i++) {
         e->in_acc[e->in_count++] = in[i];
         if (e->in_count == VF_FRAME_SIZE) {
             e->in_count = 0;
@@ -33,7 +43,6 @@ static void data_callback(ma_device *dev, void *output, const void *input, ma_ui
                 for (int k = 0; k < VF_FRAME_SIZE; k++)
                     e->out_fifo[(tail + k) % VF_OUT_FIFO] = e->in_acc[k];
                 e->out_count += VF_FRAME_SIZE;
-                e->primed = 1;
             } else {
                 atomic_fetch_add_explicit(&e->overruns, 1, memory_order_relaxed);
             }
@@ -41,20 +50,32 @@ static void data_callback(ma_device *dev, void *output, const void *input, ma_ui
     }
 
     /* 2) output FIFO -> playback */
-    for (ma_uint32 i = 0; i < frames; i++) {
+    for (unsigned i = 0; i < frames; i++) {
         if (e->out_count > 0) {
             out[i] = e->out_fifo[e->out_head];
             e->out_head = (e->out_head + 1) % VF_OUT_FIFO;
             e->out_count--;
         } else {
             out[i] = 0.0f;
-            if (e->primed)
-                atomic_fetch_add_explicit(&e->underruns, 1, memory_order_relaxed);
+            atomic_fetch_add_explicit(&e->underruns, 1, memory_order_relaxed);
         }
     }
 }
 
+static void data_callback(ma_device *dev, void *output, const void *input, ma_uint32 frames)
+{
+    engine_process_block((Engine *)dev->pUserData, (float *)output, (const float *)input, frames);
+}
+
 /* ---- control thread ---- */
+
+void engine_init_offline(Engine *e, Pipeline *pipe)
+{
+    memset(e, 0, sizeof *e);
+    e->pipe = pipe;
+    atomic_init(&e->underruns, 0);
+    atomic_init(&e->overruns, 0);
+}
 
 int engine_init(Engine *e, ma_context *ctx, Pipeline *pipe,
                 const ma_device_id *capture_id, const ma_device_id *playback_id)
@@ -107,6 +128,7 @@ void engine_latency(const Engine *e, EngineLatency *out)
                        d->capture.internalPeriods / (double)d->capture.internalSampleRate;
     out->playback_ms = 1000.0 * d->playback.internalPeriodSizeInFrames *
                        d->playback.internalPeriods / (double)d->playback.internalSampleRate;
-    out->frame_ms = 1000.0 * VF_FRAME_SIZE / VF_SAMPLE_RATE;
-    out->total_ms = out->capture_ms + out->playback_ms + out->frame_ms;
+    out->fifo_ms = 1000.0 * e->prime_samples / VF_SAMPLE_RATE;
+    out->dsp_ms = 1000.0 * pipeline_delay_samples(e->pipe) / VF_SAMPLE_RATE;
+    out->total_ms = out->capture_ms + out->playback_ms + out->fifo_ms + out->dsp_ms;
 }

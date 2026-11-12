@@ -16,6 +16,8 @@ typedef struct {
     DenoiseState *st;
     float in[VF_FRAME_SIZE];
     float out[VF_FRAME_SIZE];
+    float dry[RNNOISE_DELAY_SAMPLES];   /* delay line for the dry path (ring) */
+    int   dry_pos;
     float wet;
 } RnState;
 
@@ -41,8 +43,14 @@ static void rn_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
     ctx->vad_prob = vad;
     ctx->vad_valid = 1;
     const float w = s->wet, d = 1.0f - w;
-    for (int i = 0; i < n; i++)
-        buf[i] = (s->out[i] * w + s->in[i] * d) * (1.0f / RN_SCALE);
+    int p = s->dry_pos;
+    for (int i = 0; i < n; i++) {
+        const float delayed = s->dry[p];        /* input from RNNOISE_DELAY_SAMPLES ago */
+        s->dry[p] = buf[i];
+        if (++p == RNNOISE_DELAY_SAMPLES) p = 0;
+        buf[i] = s->out[i] * w * (1.0f / RN_SCALE) + delayed * d;
+    }
+    s->dry_pos = p;
 }
 
 static void rn_set_param(Fx *fx, int id, float v)
@@ -70,5 +78,6 @@ void fx_rnnoise_make(Fx *fx)
     fx->destroy = rn_destroy;
     fx->params = k_params;
     fx->n_params = (int)(sizeof k_params / sizeof k_params[0]);
+    fx->latency = RNNOISE_DELAY_SAMPLES;
     atomic_init(&fx->bypass, 0);
 }

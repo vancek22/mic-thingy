@@ -29,6 +29,8 @@ void pipeline_stop(Pipeline *p);                    /* runs fx->destroy */
 int   pipeline_set_param(Pipeline *p, int fx_index, int param_id, float value);
 float pipeline_get_param(const Pipeline *p, int fx_index, int param_id);
 void  pipeline_set_bypass(Pipeline *p, int fx_index, int bypass);
+/* Sum of the algorithmic delays of the active (non-bypassed) effects. */
+int   pipeline_delay_samples(const Pipeline *p);
 
 /* Case-insensitive prefix lookups; -1 if absent or ambiguous-free first match. */
 int pipeline_find_fx(const Pipeline *p, const char *name);

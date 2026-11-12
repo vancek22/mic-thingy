@@ -5,6 +5,13 @@
 
 enum { RNNOISE_PARAM_WET = 0 };   /* 0..1, dry/wet mix (default 1) */
 
+/* Algorithmic delay of rnnoise_process_frame() in v0.2: two frames (overlap-add
+ * window + one frame of look-ahead via `delayed_X`). Verified by tests/test_dsp.c.
+ * The dry path is delayed by the same amount so dry/wet mixing is phase-aligned.
+ * Note the VAD returned for a frame describes audio that is output ~10-20 ms later,
+ * so the gate effectively gets a small look-ahead. */
+#define RNNOISE_DELAY_SAMPLES (2 * VF_FRAME_SIZE)
+
 void fx_rnnoise_make(Fx *fx);     /* fills the Fx descriptor; call fx->init next */
 
 #endif

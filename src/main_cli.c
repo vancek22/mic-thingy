@@ -95,11 +95,12 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    vf_sleep_ms(150);                        /* let the first callbacks run (FIFO pre-fill) */
     EngineLatency lat;
     engine_latency(&eng, &lat);
-    printf("\nRunning @ %d Hz. Estimated latency: capture buf %.1f ms + playback buf %.1f ms"
-           " + frame %.1f ms = ~%.1f ms%s\n",
-           VF_SAMPLE_RATE, lat.capture_ms, lat.playback_ms, lat.frame_ms, lat.total_ms,
+    printf("\nRunning @ %d Hz. Estimated latency: capture buf %.1f + playback buf %.1f"
+           " + FIFO %.1f + DSP %.1f ms = ~%.1f ms%s\n",
+           VF_SAMPLE_RATE, lat.capture_ms, lat.playback_ms, lat.fifo_ms, lat.dsp_ms, lat.total_ms,
            lat.total_ms > 20.0 ? "  (above the 20 ms target)" : "");
     if (lat.capture_rate != VF_SAMPLE_RATE || lat.playback_rate != VF_SAMPLE_RATE)
         printf("Note: device runs at %u/%u Hz, resampling adds some delay.\n",

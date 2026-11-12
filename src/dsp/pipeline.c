@@ -73,6 +73,15 @@ void pipeline_set_bypass(Pipeline *p, int fi, int bypass)
     if (fi >= 0 && fi < p->count) atomic_store(&p->fx[fi]->bypass, bypass ? 1 : 0);
 }
 
+int pipeline_delay_samples(const Pipeline *p)
+{
+    if (atomic_load(&((Pipeline *)p)->bypass_all)) return 0;
+    int d = 0;
+    for (int i = 0; i < p->count; i++)
+        if (!atomic_load(&p->fx[i]->bypass)) d += p->fx[i]->latency;
+    return d;
+}
+
 static int prefix_ci(const char *s, const char *prefix)
 {
     for (; *prefix; s++, prefix++)
