@@ -125,8 +125,10 @@ RNNoise has no upstream CMake: built by our own target using the portable (non-x
    `k_str` table in BOTH languages (ctest checks none is empty). Built-in presets have stable keys
    (default/noisy/podcast/natural) stored in settings; display names come from `vf_preset_display_name()`;
    old Polish names still map to the keys. Tray menu/tooltip follow the language.
-   Look ("2000s, green"): dark chassis + neon green, Win2000-style bevelled panels with gradient title strips and
-   status LEDs, segmented LED meters, LCD windows with scanlines (Lucida Console), Tahoma UI font, blinking
+   Look ("2000s"), split-complementary palette: cool graphite/slate neutrals (chassis, panels, title strips),
+   neon green ONLY for accents and anything switched ON, burgundy for anything switched OFF / errors, amber only
+   as meter warning. On/off controls use `onoff()` (green on / burgundy off) - use it for any new switch.
+   Win2000-style bevelled panels with gradient title strips and status LEDs (green on, dim green idle, burgundy off), segmented LED meters, LCD windows with scanlines (Lucida Console), Tahoma UI font, blinking
    cursor status line. Theme colours/fonts are at the top of `main_gui.c` (`C_*`, `load_fonts`, `apply_style`).
    Screenshot checks: use a VF_CONFIG_DIR with `start_processing = 0` plus `--in-file`, otherwise the real mic
    is opened (and in monitor mode played to the speakers).

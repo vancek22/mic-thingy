@@ -30,19 +30,31 @@
 
 /* ------------------------------------------------------------------ theme */
 
-#define C_BG_TOP     (Color){ 20, 30, 19, 255 }
-#define C_BG_BOTTOM  (Color){ 7, 11, 7, 255 }
-#define C_PANEL      (Color){ 11, 19, 11, 255 }
-#define C_BEVEL_HI   (Color){ 70, 120, 62, 255 }
-#define C_BEVEL_LO   (Color){ 2, 4, 2, 255 }
-#define C_EDGE       (Color){ 31, 64, 27, 255 }
+/* Split-complementary palette around the green accent (hue ~110 deg):
+ *   neutral  - cool graphite / slate (hue ~220 deg, low saturation): chassis, panels, title strips
+ *   accent   - neon green: LEDs, values, meters, anything switched ON
+ *   contrast - burgundy (hue ~345 deg): anything switched OFF, errors
+ * Amber stays only as the meter warning colour. */
+#define C_BG_TOP     (Color){ 30, 34, 43, 255 }
+#define C_BG_BOTTOM  (Color){ 13, 15, 20, 255 }
+#define C_PANEL      (Color){ 22, 26, 33, 255 }
+#define C_BEVEL_HI   (Color){ 72, 81, 99, 255 }
+#define C_BEVEL_LO   (Color){ 4, 5, 7, 255 }
+#define C_EDGE       (Color){ 41, 48, 61, 255 }
+#define C_SLATE_A    (Color){ 50, 62, 92, 255 }     /* title strip gradient */
+#define C_SLATE_B    (Color){ 24, 29, 42, 255 }
 #define C_NEON       (Color){ 57, 255, 20, 255 }
-#define C_TEXT       (Color){ 140, 242, 122, 255 }
-#define C_TEXT_DIM   (Color){ 76, 138, 68, 255 }
-#define C_LCD_BG     (Color){ 3, 14, 3, 255 }
-#define C_SEG_OFF    (Color){ 16, 40, 16, 255 }
-#define C_AMBER      (Color){ 255, 196, 40, 255 }
-#define C_RED        (Color){ 255, 64, 48, 255 }
+#define C_GREEN_BTN  (Color){ 40, 150, 32, 255 }
+#define C_BURGUNDY   (Color){ 128, 22, 52, 255 }
+#define C_BURG_HI    (Color){ 196, 60, 96, 255 }
+#define C_BURG_TEXT  (Color){ 255, 214, 224, 255 }
+#define C_TEXT       (Color){ 205, 213, 225, 255 }  /* cool off-white */
+#define C_TEXT_DIM   (Color){ 120, 131, 151, 255 }
+#define C_TITLE      (Color){ 236, 241, 248, 255 }
+#define C_LCD_BG     (Color){ 9, 11, 15, 255 }
+#define C_SEG_OFF    (Color){ 30, 36, 46, 255 }
+#define C_AMBER      (Color){ 255, 190, 50, 255 }
+#define C_RED        (Color){ 255, 84, 110, 255 }
 
 typedef struct { Font ui, bold, title, lcd, lcd_big; } Fonts;
 static Fonts F;
@@ -98,23 +110,29 @@ static void apply_style(void)
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
     GuiSetStyle(DEFAULT, TEXT_SPACING, 0);
     GuiSetStyle(DEFAULT, BORDER_WIDTH, 1);
-    GuiSetStyle(DEFAULT, BORDER_COLOR_NORMAL, hexc((Color){ 47, 125, 34, 255 }));
-    GuiSetStyle(DEFAULT, BASE_COLOR_NORMAL, hexc((Color){ 15, 29, 14, 255 }));
+    GuiSetStyle(DEFAULT, BORDER_COLOR_NORMAL, hexc((Color){ 66, 76, 95, 255 }));
+    GuiSetStyle(DEFAULT, BASE_COLOR_NORMAL, hexc((Color){ 32, 38, 48, 255 }));
     GuiSetStyle(DEFAULT, TEXT_COLOR_NORMAL, hexc(C_TEXT));
-    GuiSetStyle(DEFAULT, BORDER_COLOR_FOCUSED, hexc((Color){ 125, 255, 92, 255 }));
-    GuiSetStyle(DEFAULT, BASE_COLOR_FOCUSED, hexc((Color){ 28, 58, 23, 255 }));
-    GuiSetStyle(DEFAULT, TEXT_COLOR_FOCUSED, hexc((Color){ 200, 255, 184, 255 }));
-    GuiSetStyle(DEFAULT, BORDER_COLOR_PRESSED, hexc((Color){ 182, 255, 156, 255 }));
-    GuiSetStyle(DEFAULT, BASE_COLOR_PRESSED, hexc((Color){ 47, 160, 31, 255 }));
-    GuiSetStyle(DEFAULT, TEXT_COLOR_PRESSED, hexc((Color){ 4, 16, 4, 255 }));
-    GuiSetStyle(DEFAULT, BORDER_COLOR_DISABLED, hexc((Color){ 28, 46, 26, 255 }));
-    GuiSetStyle(DEFAULT, BASE_COLOR_DISABLED, hexc((Color){ 11, 19, 11, 255 }));
-    GuiSetStyle(DEFAULT, TEXT_COLOR_DISABLED, hexc((Color){ 47, 74, 43, 255 }));
-    GuiSetStyle(DEFAULT, LINE_COLOR, hexc((Color){ 47, 125, 34, 255 }));
+    GuiSetStyle(DEFAULT, BORDER_COLOR_FOCUSED, hexc((Color){ 110, 220, 90, 255 }));
+    GuiSetStyle(DEFAULT, BASE_COLOR_FOCUSED, hexc((Color){ 42, 50, 64, 255 }));
+    GuiSetStyle(DEFAULT, TEXT_COLOR_FOCUSED, hexc(C_TITLE));
+    GuiSetStyle(DEFAULT, BORDER_COLOR_PRESSED, hexc((Color){ 150, 255, 120, 255 }));
+    GuiSetStyle(DEFAULT, BASE_COLOR_PRESSED, hexc(C_GREEN_BTN));
+    GuiSetStyle(DEFAULT, TEXT_COLOR_PRESSED, hexc((Color){ 240, 255, 236, 255 }));
+    GuiSetStyle(DEFAULT, BORDER_COLOR_DISABLED, hexc((Color){ 40, 45, 55, 255 }));
+    GuiSetStyle(DEFAULT, BASE_COLOR_DISABLED, hexc((Color){ 24, 27, 34, 255 }));
+    GuiSetStyle(DEFAULT, TEXT_COLOR_DISABLED, hexc((Color){ 70, 77, 92, 255 }));
+    GuiSetStyle(DEFAULT, LINE_COLOR, hexc((Color){ 66, 76, 95, 255 }));
     GuiSetStyle(DEFAULT, BACKGROUND_COLOR, hexc(C_PANEL));
     GuiSetStyle(SLIDER, BORDER_WIDTH, 1);
     GuiSetStyle(SLIDER, SLIDER_PADDING, 1);
     GuiSetStyle(SLIDER, BASE_COLOR_NORMAL, hexc(C_LCD_BG));
+    GuiSetStyle(SLIDER, BASE_COLOR_PRESSED, hexc((Color){ 52, 200, 34, 255 }));   /* slider fill = accent */
+    GuiSetStyle(SLIDER, BASE_COLOR_FOCUSED, hexc((Color){ 52, 200, 34, 255 }));
+    GuiSetStyle(SLIDER, TEXT_COLOR_FOCUSED, hexc((Color){ 110, 255, 80, 255 }));   /* bar while hovered */
+    GuiSetStyle(SLIDER, TEXT_COLOR_PRESSED, hexc(C_NEON));                          /* bar while dragged */
+    GuiSetStyle(CHECKBOX, BASE_COLOR_PRESSED, hexc(C_NEON));                       /* check mark */
+    GuiSetStyle(CHECKBOX, BORDER_COLOR_NORMAL, hexc((Color){ 90, 102, 124, 255 }));
     GuiSetStyle(TEXTBOX, BASE_COLOR_PRESSED, hexc(C_LCD_BG));
     GuiSetStyle(TEXTBOX, TEXT_COLOR_PRESSED, hexc(C_NEON));
     GuiSetStyle(TEXTBOX, BORDER_COLOR_PRESSED, hexc(C_NEON));
@@ -149,20 +167,51 @@ static void bevel(Rectangle r, int raised)
     DrawRectangleLinesEx((Rectangle){ r.x + 3, r.y + 3, r.width - 6, r.height - 6 }, 1, C_EDGE);
 }
 
+/* led: -1 none, 0 off (burgundy), 1 on (green), 2 enabled but idle (dim green) */
 static void panel(Rectangle r, const char *title, int led)
 {
     bevel(r, 1);
     Rectangle t = { r.x + 4, r.y + 4, r.width - 8, 24 };
-    DrawRectangleGradientH((int)t.x, (int)t.y, (int)t.width, (int)t.height,
-                           (Color){ 30, 92, 22, 255 }, (Color){ 8, 26, 7, 255 });
-    DrawLine((int)t.x, (int)t.y, (int)(t.x + t.width), (int)t.y, (Color){ 120, 220, 100, 120 });
+    DrawRectangleGradientH((int)t.x, (int)t.y, (int)t.width, (int)t.height, C_SLATE_A, C_SLATE_B);
+    DrawLine((int)t.x, (int)t.y, (int)(t.x + t.width), (int)t.y, (Color){ 140, 160, 200, 110 });
+    DrawLine((int)t.x, (int)(t.y + t.height), (int)(t.x + t.width), (int)(t.y + t.height), (Color){ 57, 255, 20, 70 });
     float x = t.x + 8;
     if (led >= 0) {
-        DrawCircle((int)x + 4, (int)(t.y + 12), 4.5f, led ? C_NEON : C_SEG_OFF);
-        if (led) DrawCircle((int)x + 4, (int)(t.y + 12), 8, (Color){ 57, 255, 20, 40 });
+        Color c = led == 1 ? C_NEON : led == 2 ? (Color){ 30, 110, 22, 255 } : C_BURG_HI;
+        DrawCircle((int)x + 4, (int)(t.y + 12), 4.5f, c);
+        if (led == 1) DrawCircle((int)x + 4, (int)(t.y + 12), 8, (Color){ 57, 255, 20, 40 });
         x += 16;
     }
-    text(F.bold, title, x, t.y + 5, (Color){ 220, 255, 210, 255 });
+    text(F.bold, title, x, t.y + 5, C_TITLE);
+}
+
+/* On/off switch: green when on, burgundy when off. Returns the new state. */
+static bool onoff(Rectangle r, bool on, const char *label_on, const char *label_off)
+{
+    const int props[] = { BASE_COLOR_NORMAL, BORDER_COLOR_NORMAL, TEXT_COLOR_NORMAL,
+                          BASE_COLOR_FOCUSED, BORDER_COLOR_FOCUSED, TEXT_COLOR_FOCUSED };
+    int saved[6];
+    for (int i = 0; i < 6; i++) saved[i] = GuiGetStyle(TOGGLE, props[i]);
+    if (on) {
+        GuiSetStyle(TOGGLE, BASE_COLOR_NORMAL, hexc(C_GREEN_BTN));
+        GuiSetStyle(TOGGLE, BORDER_COLOR_NORMAL, hexc((Color){ 110, 230, 90, 255 }));
+        GuiSetStyle(TOGGLE, TEXT_COLOR_NORMAL, hexc((Color){ 240, 255, 236, 255 }));
+        GuiSetStyle(TOGGLE, BASE_COLOR_FOCUSED, hexc((Color){ 52, 178, 42, 255 }));
+        GuiSetStyle(TOGGLE, BORDER_COLOR_FOCUSED, hexc((Color){ 170, 255, 150, 255 }));
+        GuiSetStyle(TOGGLE, TEXT_COLOR_FOCUSED, hexc((Color){ 255, 255, 255, 255 }));
+    } else {
+        GuiSetStyle(TOGGLE, BASE_COLOR_NORMAL, hexc(C_BURGUNDY));
+        GuiSetStyle(TOGGLE, BORDER_COLOR_NORMAL, hexc(C_BURG_HI));
+        GuiSetStyle(TOGGLE, TEXT_COLOR_NORMAL, hexc(C_BURG_TEXT));
+        GuiSetStyle(TOGGLE, BASE_COLOR_FOCUSED, hexc((Color){ 156, 34, 68, 255 }));
+        GuiSetStyle(TOGGLE, BORDER_COLOR_FOCUSED, hexc((Color){ 236, 110, 140, 255 }));
+        GuiSetStyle(TOGGLE, TEXT_COLOR_FOCUSED, hexc((Color){ 255, 255, 255, 255 }));
+    }
+    /* draw as a non-active toggle so our "normal" colours are used in both states */
+    bool pressed = false;
+    GuiToggle(r, on ? label_on : label_off, &pressed);
+    for (int i = 0; i < 6; i++) GuiSetStyle(TOGGLE, props[i], saved[i]);
+    return pressed ? !on : on;
 }
 
 /* LCD window: dark inset with faint scanlines. */
@@ -171,7 +220,11 @@ static void lcd(Rectangle r)
     DrawRectangleRec(r, C_LCD_BG);
     for (int y = (int)r.y + 1; y < (int)(r.y + r.height); y += 2)
         DrawLine((int)r.x, y, (int)(r.x + r.width), y, (Color){ 0, 0, 0, 70 });
-    DrawRectangleLinesEx(r, 1, C_EDGE);
+    /* inset bevel: dark top-left, light bottom-right */
+    DrawLine((int)r.x, (int)r.y, (int)(r.x + r.width), (int)r.y, C_BEVEL_LO);
+    DrawLine((int)r.x, (int)r.y, (int)r.x, (int)(r.y + r.height), C_BEVEL_LO);
+    DrawLine((int)r.x, (int)(r.y + r.height), (int)(r.x + r.width), (int)(r.y + r.height), C_EDGE);
+    DrawLine((int)(r.x + r.width), (int)r.y, (int)(r.x + r.width), (int)(r.y + r.height), C_EDGE);
 }
 
 /* Segmented LED meter, -60..0 dBFS: green / amber (> -18) / red (> -6), peak-hold segment. */
@@ -206,15 +259,15 @@ static void led_bar(Rectangle r, float t, Color on)
 static void background(void)
 {
     DrawRectangleGradientV(0, 0, WIN_W, WIN_H, C_BG_TOP, C_BG_BOTTOM);
-    for (int x = 0; x < WIN_W; x += 24)                          /* faint grid */
-        DrawLine(x, HEADER_H, x, WIN_H, (Color){ 57, 255, 20, 6 });
+    for (int x = 0; x < WIN_W; x += 24)                          /* faint blueprint grid */
+        DrawLine(x, HEADER_H, x, WIN_H, (Color){ 140, 160, 210, 7 });
     for (int y = HEADER_H; y < WIN_H; y += 24)
-        DrawLine(0, y, WIN_W, y, (Color){ 57, 255, 20, 6 });
-    /* header: brushed "chrome" strip with a neon underline */
-    DrawRectangleGradientV(0, 0, WIN_W, HEADER_H, (Color){ 34, 70, 28, 255 }, (Color){ 9, 22, 8, 255 });
-    DrawLine(0, 1, WIN_W, 1, (Color){ 150, 230, 130, 90 });
+        DrawLine(0, y, WIN_W, y, (Color){ 140, 160, 210, 7 });
+    /* header: brushed slate "chrome" strip with a neon underline */
+    DrawRectangleGradientV(0, 0, WIN_W, HEADER_H, (Color){ 58, 68, 92, 255 }, (Color){ 20, 24, 33, 255 });
+    DrawLine(0, 1, WIN_W, 1, (Color){ 170, 185, 220, 90 });
     DrawRectangle(0, HEADER_H - 2, WIN_W, 2, C_NEON);
-    DrawRectangle(0, HEADER_H, WIN_W, 6, (Color){ 57, 255, 20, 30 });
+    DrawRectangle(0, HEADER_H, WIN_W, 5, (Color){ 57, 255, 20, 22 });
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -549,10 +602,13 @@ int main(int argc, char **argv)
         Rectangle r_in = { 110, r1, 400, 28 };
         GuiLabel((Rectangle){ 526, r1, 70, 28 }, tr(S_OUTPUT));
         GuiToggleGroup((Rectangle){ 596, r1, 134, 28 }, tr(S_MODES), &sel_mode);
-        if (GuiButton((Rectangle){ 1012, r1, 152, 28 }, s.running ? TextFormat("#132# %s", tr(S_STOP))
-                                                                   : TextFormat("#131# %s", tr(S_START)))) {
-            want_running = !s.running;
-            if (want_running) applied_in = -2;            /* force (re)start */
+        {   /* audio on/off: green while running, burgundy while stopped */
+            const bool now = s.running || (want_running && retry_at > 0);
+            if (onoff((Rectangle){ 1012, r1, 152, 28 }, now, tr(S_STOP), tr(S_START)) != now) {
+                want_running = !now;
+                retry_at = 0;
+                if (want_running) applied_in = -2;        /* force (re)start */
+            }
         }
 
         /* ---- row 2: second device / vmic hint, filter on/off ---- */
@@ -564,10 +620,9 @@ int main(int argc, char **argv)
             snprintf(vm, sizeof vm, tr(S_VMIC_HINT), vf_session_vmic_name(&s));
             text(F.ui, vm, 526, r2 + 6, C_TEXT_DIM);
         }
-        int bypass = atomic_load(&s.pipe.bypass_all);
-        bool byp = bypass != 0;
-        GuiToggle((Rectangle){ 1012, r2, 152, 28 }, byp ? tr(S_FILTER_OFF) : tr(S_FILTER_ON), &byp);
-        if ((int)byp != bypass) atomic_store(&s.pipe.bypass_all, byp ? 1 : 0);
+        const bool filt = !atomic_load(&s.pipe.bypass_all);
+        if (onoff((Rectangle){ 1012, r2, 152, 28 }, filt, tr(S_FILTER_ON), tr(S_FILTER_OFF)) != filt)
+            atomic_store(&s.pipe.bypass_all, filt ? 1 : 0);
 
         /* ---- row 3: presets + app options ---- */
         GuiLabel((Rectangle){ 16, r3, 92, 28 }, tr(S_PRESET));
@@ -631,16 +686,17 @@ int main(int argc, char **argv)
         panel(mb, tr(S_LEVELS), -1);
         float y = TOP + 40;
         const float mx = 30, mw = 222;
+        const Color val_c = s.running ? C_NEON : C_TEXT_DIM;   /* readouts glow only while running */
         char t[128];
         text(F.ui, tr(S_INPUT), mx, y, C_TEXT);
         snprintf(t, sizeof t, "%6.1f dB", (double)(m.hold_in < -99 ? -99 : m.hold_in));
-        text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, C_NEON);
+        text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, val_c);
         y += 22;
         led_meter((Rectangle){ mx, y, mw, 20 }, m.peak_in, m.hold_in); y += 36;
 
         text(F.ui, tr(S_OUTPUT_LEVEL), mx, y, C_TEXT);
         snprintf(t, sizeof t, "%6.1f dB", (double)(m.hold_out < -99 ? -99 : m.hold_out));
-        text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, C_NEON);
+        text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, val_c);
         y += 22;
         led_meter((Rectangle){ mx, y, mw, 20 }, m.peak_out, m.hold_out); y += 44;
 
@@ -658,13 +714,13 @@ int main(int argc, char **argv)
 
         text(F.ui, tr(S_GATE_OPEN), mx, y, C_TEXT);
         snprintf(t, sizeof t, "%3d %%", (int)(m.gate * 100 + 0.5f));
-        text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, C_NEON);
+        text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, val_c);
         y += 22;
-        led_bar((Rectangle){ mx, y, mw, 18 }, m.gate, (Color){ 80, 220, 160, 255 }); y += 40;
+        led_bar((Rectangle){ mx, y, mw, 18 }, s.running ? m.gate : 0.0f, (Color){ 80, 220, 160, 255 }); y += 40;
 
         text(F.ui, tr(S_COMPRESSION), mx, y, C_TEXT);
         snprintf(t, sizeof t, "%5.1f dB", (double)m.gr);
-        text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, C_AMBER);
+        text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, s.running ? C_AMBER : C_TEXT_DIM);
         y += 22;
         led_bar((Rectangle){ mx, y, mw, 18 }, -m.gr / 24.0f, C_AMBER); y += 46;
 
@@ -697,9 +753,13 @@ int main(int argc, char **argv)
             const float pw = 292, ph = 290;
             Rectangle box = { 282 + (i % 3) * (pw + 6), TOP + (i / 3) * (ph + 6), pw, ph };
             bool on = !atomic_load(&fx->bypass);
-            panel(box, tr_fx(fx->name), on && !atomic_load(&s.pipe.bypass_all) && s.running);
-            GuiToggle((Rectangle){ box.x + box.width - 128, box.y + 6, 44, 20 }, on ? "ON" : "OFF", &on);
-            if (on == (bool)atomic_load(&fx->bypass)) pipeline_set_bypass(&s.pipe, i, !on);
+            panel(box, tr_fx(fx->name), !on ? 0 : (s.running && !atomic_load(&s.pipe.bypass_all)) ? 1 : 2);
+            GuiSetStyle(DEFAULT, TEXT_SIZE, 14);
+            GuiSetFont(F.bold);
+            const bool non = onoff((Rectangle){ box.x + box.width - 128, box.y + 6, 44, 20 }, on, "ON", "OFF");
+            GuiSetFont(F.ui);
+            GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
+            if (non != on) { pipeline_set_bypass(&s.pipe, i, !non); on = non; }
             GuiSetStyle(DEFAULT, TEXT_SIZE, 14);
             GuiSetFont(F.bold);
             if (GuiButton((Rectangle){ box.x + box.width - 80, box.y + 6, 72, 20 }, tr(S_DEFAULTS)))
@@ -718,12 +778,12 @@ int main(int argc, char **argv)
                     py += 34;
                     continue;
                 }
-                text(F.ui, tr_param(fx->name, pi->name), box.x + 14, py, on ? C_TEXT : (Color){ 47, 74, 43, 255 });
+                text(F.ui, tr_param(fx->name, pi->name), box.x + 14, py, on ? C_TEXT : (Color){ 70, 77, 92, 255 });
                 char val[48];
                 const int ints = pi->max - pi->min >= 50.0f;
                 snprintf(val, sizeof val, ints ? "%.0f %s" : "%.2f %s", (double)v, pi->unit);
                 const float vw = MeasureTextEx(F.lcd, val, 14, 0).x;
-                text(F.lcd, val, box.x + box.width - 14 - vw, py + 2, on ? C_NEON : (Color){ 47, 74, 43, 255 });
+                text(F.lcd, val, box.x + box.width - 14 - vw, py + 2, on ? C_NEON : (Color){ 70, 77, 92, 255 });
                 float nv = v;
                 GuiSliderBar((Rectangle){ box.x + 14, py + 19, box.width - 28, 10 }, NULL, NULL, &nv, pi->min, pi->max);
                 if (nv != v) {
