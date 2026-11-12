@@ -59,7 +59,10 @@ add_library(vfcore STATIC
   src/util/console.c
   src/util/ringbuf.c
   src/util/wavio.c
-  src/app/session.c)
+  src/util/ini.c
+  src/util/platform.c
+  src/app/session.c
+  src/app/settings.c)
 target_include_directories(vfcore PUBLIC src)
 target_link_libraries(vfcore PUBLIC rnnoise miniaudio)
 

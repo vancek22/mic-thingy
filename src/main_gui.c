@@ -15,10 +15,13 @@
 #include "raygui.h"
 
 #include "app/session.h"
+#include "app/settings.h"
+#include "util/platform.h"
 #include "util/wavio.h"
 
 #define WIN_W 1180
-#define WIN_H 720
+#define WIN_H 754
+#define TOP   134          /* y of the meter / effect panels */
 #define LIST_CHARS 8192
 #define NAME_MAX_CHARS 44
 
@@ -183,11 +186,49 @@ static void draw_fill(Rectangle r, float t, Color c)
     DrawRectangle((int)r.x, (int)r.y, (int)(r.width * t), (int)r.height, c);
 }
 
+static int find_name(const VfDeviceList *l, const char *name)
+{
+    if (!name[0]) return -1;
+    for (int i = 0; i < l->count; i++)
+        if (!strcmp(l->dev[i].name, name)) return i;
+    return -1;
+}
+
+/* Cheap fingerprint of everything that is saved, to detect changes. */
+static unsigned long long settings_hash(const VfSession *s, const VfSettings *st, int a, int b, int c, int d)
+{
+    unsigned long long h = 1469598103934665603ULL;
+#define MIX(x) (h = (h ^ (unsigned long long)(x)) * 1099511628211ULL)
+    MIX(a); MIX(b); MIX(c); MIX(d); MIX(st->start_processing);
+    MIX(atomic_load(&((VfSession *)s)->pipe.bypass_all));
+    for (const char *p = st->preset; *p; p++) MIX(*p);
+    for (int i = 0; i < s->pipe.count; i++) {
+        MIX(atomic_load(&s->pipe.fx[i]->bypass));
+        for (int j = 0; j < s->pipe.fx[i]->n_params; j++) {
+            float v = pipeline_get_param(&s->pipe, i, j);
+            unsigned u;
+            memcpy(&u, &v, sizeof u);
+            MIX(u);
+        }
+    }
+#undef MIX
+    return h;
+}
+
+static void build_preset_list(char *out, size_t cap, VfPresetInfo *list, int *n)
+{
+    *n = vf_presets_list(list, VF_MAX_PRESETS);
+    size_t len = 0;
+    out[0] = '\0';
+    for (int i = 0; i < *n && len + 4 < cap; i++)
+        len += (size_t)snprintf(out + len, cap - len, "%s%s%s", i ? ";" : "", list[i].name, list[i].builtin ? "" : " *");
+}
+
 /* ------------------------------------------------------------------ main */
 
 int main(int argc, char **argv)
 {
-    int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0;
+    int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0;
     const char *in_file = NULL, *shot = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--autostart")) autostart = 1;
@@ -196,10 +237,19 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) frames_to_shot = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--verbose")) verbose = 1;
+        else if (!strcmp(argv[i], "--minimized")) minimized = 1;
     }
 
     static VfSession s;
     int init_ok = vf_session_init(&s, 1) == 0;
+
+    /* settings.ini: devices by name, mode, effect parameters */
+    VfSettings st;
+    vf_settings_defaults(&st);
+    char settings_file[VF_PATH_MAX] = "";
+    int have_settings_path = vf_settings_path(settings_file, sizeof settings_file) == 0;
+    if (init_ok && have_settings_path) vf_settings_load(&st, &s.pipe, settings_file);
+    int autostart_on = vf_autostart_get();
 
     float *file_buf = NULL;
     long file_len = 0;
@@ -209,6 +259,7 @@ int main(int argc, char **argv)
     SetTraceLogLevel(verbose ? LOG_INFO : LOG_WARNING);
     InitWindow(WIN_W, WIN_H, "VoiceFilter");
     SetTargetFPS(60);
+    if (minimized) MinimizeWindow();
     /* Order matters: GuiLoadStyleDefault() unloads the texture of a previously set
      * custom font, so reset the style first and set our font afterwards. */
     GuiLoadStyleDefault();
@@ -227,18 +278,30 @@ int main(int argc, char **argv)
     if (sel_mon < s.plays.count && vf_contains_ci(s.plays.dev[sel_mon].name, "CABLE"))
         for (int i = 0; i < s.plays.count; i++)
             if (!vf_contains_ci(s.plays.dev[i].name, "CABLE")) { sel_mon = i; break; }
-    int sel_mode = mode >= 0 && mode <= 2 ? mode : VF_OUT_VMIC;
-    int edit_in = 0, edit_out = 0;
-    static char list_in[LIST_CHARS], list_out[LIST_CHARS];
+    int k;
+    if ((k = find_name(&s.caps, st.input)) >= 0) sel_in = k;
+    if ((k = find_name(&s.plays, st.output)) >= 0) sel_out = k;
+    if ((k = find_name(&s.plays, st.monitor)) >= 0) sel_mon = k;
+    int sel_mode = mode >= 0 && mode <= 2 ? mode : (st.mode >= 0 && st.mode <= 2 ? st.mode : VF_OUT_VMIC);
+    int edit_in = 0, edit_out = 0, edit_preset = 0, edit_name = 0;
+    static char list_in[LIST_CHARS], list_out[LIST_CHARS], list_presets[LIST_CHARS];
     build_list(list_in, sizeof list_in, &s.caps);
     build_list(list_out, sizeof list_out, &s.plays);
+    static VfPresetInfo presets[VF_MAX_PRESETS];
+    int n_presets = 0, sel_preset = 0, shown_preset = 0;
+    build_preset_list(list_presets, sizeof list_presets, presets, &n_presets);
+    for (int i = 0; i < n_presets; i++) if (!strcmp(presets[i].name, st.preset)) sel_preset = shown_preset = i;
+    char preset_name[64] = "";
 
-    char status[300] = "";
+    char status[300] = "", note[200] = "";
     if (!init_ok) snprintf(status, sizeof status, "%s", s.error);
 
     Meters m = { -120, -120, -120, -120, 0, 0, 0, 1, 0, 0 };
-    int want_running = autostart && init_ok, applied_in = -1, applied_out = -1, applied_mon = -1, applied_mode = -1;
+    int want_running = (autostart || st.start_processing) && init_ok;
+    int applied_in = -1, applied_out = -1, applied_mon = -1, applied_mode = -1;
     int frame_no = 0;
+    unsigned long long saved_hash = settings_hash(&s, &st, sel_in, sel_out, sel_mon, sel_mode);
+    double dirty_since = -1;
 
     while (!WindowShouldClose()) {
         const float dt = GetFrameTime();
@@ -265,9 +328,28 @@ int main(int argc, char **argv)
             drain_meters(&s, &m, dt);
         }
 
+        /* ---- autosave settings.ini one second after the last change ---- */
+        if (init_ok && have_settings_path) {
+            unsigned long long h = settings_hash(&s, &st, sel_in, sel_out, sel_mon, sel_mode);
+            if (h != saved_hash) {
+                if (dirty_since < 0) dirty_since = GetTime();
+                if (GetTime() - dirty_since > 1.0) {
+                    snprintf(st.input, sizeof st.input, "%s", sel_in < s.caps.count ? s.caps.dev[sel_in].name : "");
+                    snprintf(st.output, sizeof st.output, "%s", sel_out < s.plays.count ? s.plays.dev[sel_out].name : "");
+                    snprintf(st.monitor, sizeof st.monitor, "%s", sel_mon < s.plays.count ? s.plays.dev[sel_mon].name : "");
+                    st.mode = sel_mode;
+                    st.bypass = atomic_load(&s.pipe.bypass_all);
+                    if (vf_settings_save(&st, &s.pipe, settings_file) != 0)
+                        snprintf(status, sizeof status, "Nie udało się zapisać %s", settings_file);
+                    saved_hash = h;
+                    dirty_since = -1;
+                }
+            }
+        }
+
         BeginDrawing();
         ClearBackground((Color){ 245, 246, 248, 255 });
-        if (edit_in || edit_out) GuiLock();
+        if (edit_in || edit_out || edit_preset) GuiLock();
 
         /* ---- header: devices and mode ---- */
         GuiLabel((Rectangle){ 16, 14, 80, 28 }, "Mikrofon");
@@ -295,9 +377,56 @@ int main(int argc, char **argv)
             if (want_running) applied_in = -2;            /* force (re)start */
         }
 
+        /* ---- presets + app options ---- */
+        GuiLabel((Rectangle){ 16, 90, 80, 28 }, "Preset");
+        Rectangle r_preset = { 96, 90, 250, 28 };
+        if (GuiTextBox((Rectangle){ 360, 90, 190, 28 }, preset_name, sizeof preset_name - 1, edit_name)) edit_name = !edit_name;
+        if (GuiButton((Rectangle){ 556, 90, 120, 28 }, "Zapisz jako")) {
+            char safe[64];
+            if (vf_preset_sanitize(preset_name, safe, sizeof safe) != 0)
+                snprintf(note, sizeof note, "Wpisz nazwę presetu w polu obok.");
+            else if (vf_preset_is_builtin(safe))
+                snprintf(note, sizeof note, "\"%s\" to preset wbudowany - wybierz inną nazwę.", safe);
+            else if (vf_preset_save(&s.pipe, safe) != 0)
+                snprintf(note, sizeof note, "Nie udało się zapisać presetu.");
+            else {
+                build_preset_list(list_presets, sizeof list_presets, presets, &n_presets);
+                for (int i = 0; i < n_presets; i++) if (!strcmp(presets[i].name, safe)) sel_preset = shown_preset = i;
+                snprintf(st.preset, sizeof st.preset, "%s", safe);
+                snprintf(note, sizeof note, "Zapisano preset \"%s\".", safe);
+                preset_name[0] = '\0';
+                edit_name = 0;
+            }
+        }
+        const int user_preset = sel_preset < n_presets && !presets[sel_preset].builtin;
+        if (!user_preset) GuiDisable();
+        if (GuiButton((Rectangle){ 682, 90, 80, 28 }, "Usuń") && user_preset) {
+            char gone[64];
+            snprintf(gone, sizeof gone, "%s", presets[sel_preset].name);
+            if (vf_preset_delete(gone) == 0) {
+                build_preset_list(list_presets, sizeof list_presets, presets, &n_presets);
+                sel_preset = shown_preset = 0;
+                snprintf(st.preset, sizeof st.preset, "%s", presets[0].name);
+                snprintf(note, sizeof note, "Usunięto preset \"%s\".", gone);
+            }
+        }
+        GuiEnable();
+        bool as = autostart_on != 0;
+        GuiCheckBox((Rectangle){ 790, 95, 18, 18 }, "Start z systemem", &as);
+        if ((int)as != autostart_on) {
+            if (vf_autostart_set(as) == 0) {
+                autostart_on = as;
+                snprintf(note, sizeof note, as ? "VoiceFilter uruchomi się z systemem (zminimalizowany)."
+                                               : "Autostart wyłączony.");
+            } else snprintf(status, sizeof status, "Nie udało się zmienić autostartu.");
+        }
+        bool sp = st.start_processing != 0;
+        GuiCheckBox((Rectangle){ 960, 95, 18, 18 }, "Filtruj od razu po starcie", &sp);
+        st.start_processing = sp;
+
         /* ---- meters ---- */
-        GuiGroupBox((Rectangle){ 16, 100, 250, 586 }, "Poziomy");
-        int y = 118;
+        GuiGroupBox((Rectangle){ 16, TOP, 250, 586 }, "Poziomy");
+        int y = TOP + 18;
         char t[96];
         GuiLabel((Rectangle){ 28, y, 220, 20 }, "Wejście"); y += 22;
         draw_level((Rectangle){ 28, y, 226, 16 }, m.peak_in, m.hold_in);
@@ -352,7 +481,7 @@ int main(int argc, char **argv)
         for (int i = 0; i < s.pipe.count; i++) {
             Fx *fx = s.pipe.fx[i];
             const float pw = 292, ph = 290;
-            Rectangle box = { 282 + (i % 3) * (pw + 6), 100 + (i / 3) * (ph + 6), pw, ph };
+            Rectangle box = { 282 + (i % 3) * (pw + 6), TOP + (i / 3) * (ph + 6), pw, ph };
             GuiGroupBox(box, fx_title(fx->name));
             bool on = !atomic_load(&fx->bypass);
             GuiCheckBox((Rectangle){ box.x + 12, box.y + 16, 18, 18 }, "włączony", &on);
@@ -388,12 +517,12 @@ int main(int argc, char **argv)
         }
 
         /* ---- status bar ---- */
-        char st[400];
-        if (status[0]) snprintf(st, sizeof st, "Błąd: %s", status);
-        else if (s.running) snprintf(st, sizeof st, "Działa - %s%s", s.use_pw ? "PipeWire" : ma_get_backend_name(s.ctx.backend),
-                                     file_buf ? " (źródło: plik testowy)" : "");
-        else snprintf(st, sizeof st, "Zatrzymane - wybierz urządzenia i naciśnij Start");
-        GuiStatusBar((Rectangle){ 0, WIN_H - 26, WIN_W, 26 }, st);
+        char sb[600];
+        if (status[0]) snprintf(sb, sizeof sb, "Błąd: %s", status);
+        else if (s.running) snprintf(sb, sizeof sb, "Działa - %s%s%s%s", s.use_pw ? "PipeWire" : ma_get_backend_name(s.ctx.backend),
+                                     file_buf ? " (źródło: plik testowy)" : "", note[0] ? "   |   " : "", note);
+        else snprintf(sb, sizeof sb, "Zatrzymane - wybierz urządzenia i naciśnij Start%s%s", note[0] ? "   |   " : "", note);
+        GuiStatusBar((Rectangle){ 0, WIN_H - 26, WIN_W, 26 }, sb);
         if (status[0]) DrawRectangle(0, WIN_H - 26, 4, 26, RED);
 
         /* ---- dropdowns last, so their open lists cover the rest ---- */
@@ -405,6 +534,14 @@ int main(int argc, char **argv)
         if (s.running && file_buf) GuiDisable();
         if (GuiDropdownBox(r_in, list_in, &sel_in, edit_in)) edit_in = !edit_in;
         GuiEnable();
+        if (GuiDropdownBox(r_preset, list_presets, &sel_preset, edit_preset)) edit_preset = !edit_preset;
+        if (!edit_preset && sel_preset != shown_preset && sel_preset < n_presets) {
+            if (vf_preset_apply(&s.pipe, presets[sel_preset].name) == 0) {
+                snprintf(st.preset, sizeof st.preset, "%s", presets[sel_preset].name);
+                snprintf(note, sizeof note, "Wczytano preset \"%s\".", presets[sel_preset].name);
+            } else snprintf(status, sizeof status, "Nie udało się wczytać presetu.");
+            shown_preset = sel_preset;
+        }
 
         EndDrawing();
 
@@ -414,6 +551,15 @@ int main(int argc, char **argv)
         }
     }
 
+    /* final save (also catches changes made within the last second) */
+    if (init_ok && have_settings_path && !shot) {
+        snprintf(st.input, sizeof st.input, "%s", sel_in < s.caps.count ? s.caps.dev[sel_in].name : "");
+        snprintf(st.output, sizeof st.output, "%s", sel_out < s.plays.count ? s.plays.dev[sel_out].name : "");
+        snprintf(st.monitor, sizeof st.monitor, "%s", sel_mon < s.plays.count ? s.plays.dev[sel_mon].name : "");
+        st.mode = sel_mode;
+        st.bypass = atomic_load(&s.pipe.bypass_all);
+        vf_settings_save(&st, &s.pipe, settings_file);
+    }
     vf_session_free(&s);
     UnloadFont(font);
     CloseWindow();

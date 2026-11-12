@@ -100,4 +100,13 @@ RNNoise has no upstream CMake: built by our own target using the portable (non-x
    Visual check: `build\voicefilter --autostart --mode 1 --in-file mix.wav --screenshot shot.png --frames 150`
    (writes shot.png into the working directory and quits; `--verbose` = raylib log).
    Linux GUI deps: `libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`.
-5. INI settings, presets, autostart.
+5. [done] Settings, presets, autostart. `src/app/settings.c` + `src/util/ini.c` + `src/util/platform.c`.
+   `settings.ini` in `%APPDATA%\VoiceFilter` / `$XDG_CONFIG_HOME/voicefilter` (override: env `VF_CONFIG_DIR`,
+   used by tests): [audio] devices BY NAME + mode + bypass, [app] start_processing + preset, [fx.<name>] enabled +
+   params. GUI autosaves 1 s after a change and on exit (not in --screenshot runs); CLI reads [fx.*]
+   (`--no-config`, `--preset NAME`). Presets: built-ins in code (Domyślny, Głośne otoczenie, Podcast, Naturalny,
+   as "set fx param value" lines), user presets in `presets/<name>.ini` (fx sections only, names sanitized,
+   built-in names refused). Autostart: HKCU\...\Run "VoiceFilter" / `~/.config/autostart/voicefilter.desktop`,
+   command `"<exe>" --autostart --minimized`. Autostart test is opt-in: `VF_TEST_AUTOSTART=1` (uses a separate
+   "VoiceFilter_selftest" entry and removes it).
+   Paths are UTF-8 everywhere; on Windows `vf_fopen` / `vf_mkdir_p` convert to UTF-16.

@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "app/session.h"
+#include "app/settings.h"
 #include "util/cmdline.h"
 #include "util/console.h"
 #include "util/wavio.h"
@@ -71,14 +72,16 @@ static void usage(void)
            "  --monitor N   also play the processed voice on playback device N\n"
            "  --in-file F   use a sound file (looped) instead of the microphone (testing)\n"
            "  --seconds S   quit automatically after S seconds\n"
-           "  -c CMD        run a console command at start, e.g. -c \"set comp ratio 4\"\n");
+           "  -c CMD        run a console command at start, e.g. -c \"set comp ratio 4\"\n"
+           "  --preset NAME apply a preset (built-in: Domyślny, Głośne otoczenie, Podcast, Naturalny)\n"
+           "  --no-config   ignore the effect settings saved by the GUI (settings.ini)\n");
 }
 
 int main(int argc, char **argv)
 {
-    int pre_in = -1, pre_out = -1, pre_mon = -1, period = 0, mode = -1, ncmd = 0;
+    int pre_in = -1, pre_out = -1, pre_mon = -1, period = 0, mode = -1, ncmd = 0, no_config = 0;
     double seconds = 0;
-    const char *in_file = NULL, *cmds[MAX_CMDS];
+    const char *in_file = NULL, *cmds[MAX_CMDS], *preset = NULL;
     for (int i = 1; i < argc; i++) {
         const int more = i + 1 < argc;
         if (!strcmp(argv[i], "--in") && more) pre_in = atoi(argv[++i]);
@@ -89,13 +92,27 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--in-file") && more) in_file = argv[++i];
         else if (!strcmp(argv[i], "--seconds") && more) seconds = atof(argv[++i]);
         else if (!strcmp(argv[i], "-c") && more && ncmd < MAX_CMDS) cmds[ncmd++] = argv[++i];
+        else if (!strcmp(argv[i], "--no-config")) no_config = 1;
+        else if (!strcmp(argv[i], "--preset") && more) preset = argv[++i];
         else { usage(); return 2; }
     }
 
     vf_console_init();
     static VfSession s;
     if (vf_session_init(&s, 0) != 0) { fprintf(stderr, "%s\n", s.error); return 1; }
-    printf("VoiceFilter - backend: %s\n\n", ma_get_backend_name(s.ctx.backend));
+    printf("VoiceFilter - backend: %s\n", ma_get_backend_name(s.ctx.backend));
+    char cfg_path[VF_PATH_MAX];
+    if (!no_config && vf_settings_path(cfg_path, sizeof cfg_path) == 0) {
+        VfSettings st;
+        vf_settings_defaults(&st);
+        if (vf_settings_load(&st, &s.pipe, cfg_path) == 0)
+            printf("Effect settings loaded from %s (--no-config to skip)\n", cfg_path);
+    }
+    if (preset) {
+        if (vf_preset_apply(&s.pipe, preset) == 0) printf("Preset \"%s\" applied\n", preset);
+        else { fprintf(stderr, "Unknown preset \"%s\"\n", preset); return 1; }
+    }
+    printf("\n");
 
     const int interactive = mode < 0;
     if (interactive || (pre_in < 0 && !in_file)) {

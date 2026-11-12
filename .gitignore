@@ -12,4 +12,6 @@ out/
 *.so
 *.log
 compile_commands.json
+vf_test_config/
+*.tmp
 .cache/

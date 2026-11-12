@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "app/session.h"
+#include "app/settings.h"
 #include "audio/engine.h"
 #include "audio/sink.h"
 #include "util/ringbuf.h"
@@ -537,8 +539,123 @@ static void test_engine_taps(void)
     pipeline_stop(&p);
 }
 
+static void set_env(const char *k, const char *v)
+{
+#ifdef _WIN32
+    _putenv_s(k, v);
+#else
+    setenv(k, v, 1);
+#endif
+}
+
+static void test_ini(void)
+{
+    printf("ini parser\n");
+    VfIni ini;
+    vf_ini_parse(&ini, "\xEF\xBB\xBF; comment\n[Audio]\n  input = Mikrofon (Łódź) = x \r\n# c\n"
+                       "mode=vmic\n[fx.gate]\nthreshold=0.4\nthreshold = 0.7\nbroken line\n[empty]\n");
+    const char *in = vf_ini_get(&ini, "audio", "INPUT");
+    CHECK(in && !strcmp(in, "Mikrofon (Łódź) = x"), "value with '=' and UTF-8: '%s'", in ? in : "(null)");
+    CHECK(vf_ini_get(&ini, "audio", "mode") && !strcmp(vf_ini_get(&ini, "audio", "mode"), "vmic"), "mode");
+    CHECK(!strcmp(vf_ini_get(&ini, "fx.gate", "threshold"), "0.7"), "last value wins");
+    CHECK(vf_ini_get(&ini, "audio", "nope") == NULL, "missing key");
+    CHECK(vf_ini_get_int(&ini, "audio", "mode", 42) == 42, "non-numeric int -> default");
+    vf_ini_free(&ini);
+}
+
+static void test_settings_presets(void)
+{
+    printf("settings + presets\n");
+    set_env("VF_CONFIG_DIR", "vf_test_config");
+    static Chain c1, c2;
+    static Pipeline p1, p2;
+    pipeline_init(&p1); chain_build(&c1, &p1); pipeline_start(&p1, SR);
+    pipeline_init(&p2); chain_build(&c2, &p2); pipeline_start(&p2, SR);
+
+    /* round trip */
+    VfSettings s, r;
+    vf_settings_defaults(&s);
+    snprintf(s.input, sizeof s.input, "Mikrofon (Łódź; USB)");
+    snprintf(s.output, sizeof s.output, "Słuchawki");
+    s.mode = VF_OUT_VMIC_MONITOR;
+    s.start_processing = 1;
+    s.bypass = 1;
+    snprintf(s.preset, sizeof s.preset, "Podcast");
+    pipeline_set_param(&p1, 2, GATE_THRESHOLD, 0.37f);
+    pipeline_set_param(&p1, 3, COMP_RATIO, 4.25f);
+    pipeline_set_param(&p1, 4, EQ_HIGH_DB, -3.5f);
+    pipeline_set_bypass(&p1, 4, 1);
+    atomic_store(&p1.bypass_all, 1);
+    char path[VF_PATH_MAX];
+    CHECK(vf_settings_path(path, sizeof path) == 0, "settings path");
+    CHECK(vf_settings_save(&s, &p1, path) == 0, "save %s", path);
+    vf_settings_defaults(&r);
+    CHECK(vf_settings_load(&r, &p2, path) == 0, "load");
+    CHECK(!strcmp(r.input, s.input) && !strcmp(r.output, s.output) && r.mode == s.mode &&
+          r.start_processing == 1 && r.bypass == 1 && !strcmp(r.preset, "Podcast"), "settings fields round trip");
+    int same = 1;
+    for (int i = 0; i < p1.count; i++) {
+        if (atomic_load(&p1.fx[i]->bypass) != atomic_load(&p2.fx[i]->bypass)) same = 0;
+        for (int j = 0; j < p1.fx[i]->n_params; j++)
+            if (fabsf(pipeline_get_param(&p1, i, j) - pipeline_get_param(&p2, i, j)) > 1e-4f) same = 0;
+    }
+    CHECK(same, "effect parameters/bypass round trip");
+    CHECK(atomic_load(&p2.bypass_all) == 1, "global bypass round trip");
+
+    /* garbage values are clamped / ignored */
+    VfIni ini;
+    vf_ini_parse(&ini, "[fx.comp]\nratio = 999\nthreshold = abc\n[fx.nope]\nx=1\n");
+    vf_fx_apply_ini(&p2, &ini);
+    vf_ini_free(&ini);
+    CHECK(pipeline_get_param(&p2, 3, COMP_RATIO) == 20.0f, "out-of-range clamped");
+
+    /* presets */
+    VfPresetInfo list[VF_MAX_PRESETS];
+    int n = vf_presets_list(list, VF_MAX_PRESETS);
+    CHECK(n >= 4 && list[0].builtin && !strcmp(list[0].name, "Domyślny"), "built-ins listed (%d)", n);
+    for (int i = 0; i < n; i++)
+        if (list[i].builtin) CHECK(vf_preset_apply(&p2, list[i].name) == 0, "built-in '%s' applies", list[i].name);
+    vf_preset_apply(&p2, "Podcast");
+    CHECK(fabsf(pipeline_get_param(&p2, 3, COMP_MAKEUP_DB) - 5.0f) < 1e-6f, "Podcast sets comp makeup");
+    vf_preset_apply(&p2, "Domyślny");
+    CHECK(pipeline_get_param(&p2, 3, COMP_MAKEUP_DB) == 3.0f && !atomic_load(&p2.fx[4]->bypass), "Domyślny resets");
+
+    CHECK(vf_preset_save(&p1, "Mój głos") == 0, "save user preset");
+    CHECK(vf_preset_save(&p1, "Podcast") != 0, "built-in name refused");
+    n = vf_presets_list(list, VF_MAX_PRESETS);
+    int found = 0;
+    for (int i = 0; i < n; i++) if (!strcmp(list[i].name, "Mój głos") && !list[i].builtin) found = 1;
+    CHECK(found, "user preset listed");
+    CHECK(vf_preset_apply(&p2, "Mój głos") == 0 &&
+          fabsf(pipeline_get_param(&p2, 3, COMP_RATIO) - 4.25f) < 1e-4f && atomic_load(&p2.fx[4]->bypass) == 1,
+          "user preset restores values");
+    CHECK(vf_preset_delete("Mój głos") == 0 && vf_preset_apply(&p2, "Mój głos") != 0, "delete user preset");
+    CHECK(vf_preset_delete("Podcast") != 0, "built-in cannot be deleted");
+
+    char out[64];
+    CHECK(vf_preset_sanitize("a/b:c*?", out, sizeof out) == 0 && !strcmp(out, "a_b_c__"), "sanitize '%s'", out);
+    CHECK(vf_preset_sanitize("  x  ", out, sizeof out) == 0 && !strcmp(out, "x"), "trim '%s'", out);
+    CHECK(vf_preset_sanitize("   ", out, sizeof out) != 0, "empty name rejected");
+    CHECK(vf_preset_sanitize("ąąą", out, 6) == 0 && !strcmp(out, "ąą"), "UTF-8 not cut in half '%s'", out);
+    vf_remove(path);
+    pipeline_stop(&p1);
+    pipeline_stop(&p2);
+
+    /* autostart touches the real registry / ~/.config/autostart: opt-in only */
+    const char *as = getenv("VF_TEST_AUTOSTART");
+    if (as && *as == '1') {
+        printf("  autostart (VF_TEST_AUTOSTART=1)\n");
+        CHECK(vf_autostart_set_named("VoiceFilter_selftest", 1) == 0, "autostart enable");
+        CHECK(vf_autostart_get_named("VoiceFilter_selftest") == 1, "autostart visible");
+        CHECK(vf_autostart_set_named("VoiceFilter_selftest", 0) == 0, "autostart disable");
+        CHECK(vf_autostart_get_named("VoiceFilter_selftest") == 0, "autostart removed");
+    }
+}
+
 int main(void)
 {
+    test_ini();
+    test_settings_presets();
     test_ring();
     test_sink();
     test_engine_taps();
