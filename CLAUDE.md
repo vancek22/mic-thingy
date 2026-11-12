@@ -38,7 +38,10 @@ RNNoise has no upstream CMake: built by our own target using the portable (non-x
 
 ## Stages
 1. [done] Mic -> RNNoise -> headphones, console device selection, `b` bypass.
-2. Remaining effects + console parameter control.
+2. [done] Full chain (highpass 4th-order, RNNoise, VAD gate, compressor, EQ3, look-ahead limiter) + console `:` commands
+   (`show`, `set <fx> <param> <value>`, `bypass`, `reset`), keys 1..6. Offline tests: `ctest --test-dir build` (`tests/test_dsp.c`).
+   Params: UI writes `Pipeline.params[fx][id]` (atomic); audio thread applies changes once per frame. Effects declare
+   their params in `Fx.params` (name/unit/min/max/default) - the GUI in stage 4 builds its sliders from that table.
 3. Virtual mic: Windows "CABLE Input" (VB-Cable), Linux `pw_stream` Audio/Source.
 4. GUI (raylib + raygui).
 5. INI settings, presets, autostart.

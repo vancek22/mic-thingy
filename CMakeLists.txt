@@ -42,10 +42,18 @@ endif()
 
 # ---------------------------------------------------------------- core lib
 add_library(vfcore STATIC
+  src/dsp/biquad.c
+  src/dsp/fx_highpass.c
   src/dsp/fx_rnnoise.c
+  src/dsp/fx_gate.c
+  src/dsp/fx_compressor.c
+  src/dsp/fx_eq3.c
+  src/dsp/fx_limiter.c
+  src/dsp/chain.c
   src/dsp/pipeline.c
   src/audio/engine.c
   src/audio/devices.c
+  src/util/cmdline.c
   src/util/console.c)
 target_include_directories(vfcore PUBLIC src)
 target_link_libraries(vfcore PUBLIC rnnoise miniaudio)
@@ -61,3 +69,12 @@ target_link_libraries(voicefilter-cli PRIVATE vfcore)
 if(NOT MSVC)
   target_compile_options(voicefilter-cli PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+# ---------------------------------------------------------------- tests
+enable_testing()
+add_executable(test_dsp tests/test_dsp.c)
+target_link_libraries(test_dsp PRIVATE vfcore)
+if(NOT MSVC)
+  target_compile_options(test_dsp PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+add_test(NAME dsp COMMAND test_dsp)

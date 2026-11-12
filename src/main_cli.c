@@ -6,8 +6,9 @@
 
 #include "audio/devices.h"
 #include "audio/engine.h"
-#include "dsp/fx_rnnoise.h"
+#include "dsp/chain.h"
 #include "dsp/pipeline.h"
+#include "util/cmdline.h"
 #include "util/console.h"
 
 static void print_list(const char *title, const VfDeviceList *l)
@@ -73,12 +74,10 @@ int main(int argc, char **argv)
     int ci = choose("Input", &caps, pre_in);
     int pi = choose("Output", &plays, pre_out);
 
-    Fx rn;
-    fx_rnnoise_make(&rn);
-    Pipeline pipe;
+    static Chain chain;
+    static Pipeline pipe;
     pipeline_init(&pipe);
-    pipeline_add(&pipe, &rn);
-    if (pipeline_start(&pipe, VF_SAMPLE_RATE) != 0) {
+    if (chain_build(&chain, &pipe) != 0 || pipeline_start(&pipe, VF_SAMPLE_RATE) != 0) {
         fprintf(stderr, "Pipeline init failed.\n");
         ma_context_uninit(&ctx);
         return 1;
@@ -105,26 +104,64 @@ int main(int argc, char **argv)
     if (lat.capture_rate != VF_SAMPLE_RATE || lat.playback_rate != VF_SAMPLE_RATE)
         printf("Note: device runs at %u/%u Hz, resampling adds some delay.\n",
                lat.capture_rate, lat.playback_rate);
-    printf("Keys:  b = bypass on/off   q = quit\n\n");
+    printf("Keys:  b = bypass all   1..%d = toggle effect   : = command   h = help   q = quit\n\n",
+           pipe.count);
 
     int running = 1;
+    char cmd[128];
+    int cmd_len = 0, editing = 0;
     while (running) {
         int k;
         while ((k = vf_console_getkey()) != -1) {
+            if (editing) {                         /* line editor for ':' commands */
+                if (k == '\r' || k == '\n') {
+                    cmd[cmd_len] = '\0';
+                    printf("\n");
+                    if (vf_cmd_execute(&pipe, cmd, stdout)) running = 0;
+                    editing = 0;
+                } else if (k == 27) {
+                    editing = 0;
+                    printf("\n");
+                } else if ((k == 8 || k == 127) && cmd_len > 0) {
+                    cmd_len--;
+                    printf("\b \b");
+                } else if (k >= 32 && k < 127 && cmd_len < (int)sizeof cmd - 1) {
+                    cmd[cmd_len++] = (char)k;
+                    putchar(k);
+                }
+                fflush(stdout);
+                continue;
+            }
             if (k == 'q' || k == 'Q' || k == 27) running = 0;
-            if (k == 'b' || k == 'B')
+            else if (k == 'b' || k == 'B')
                 atomic_store(&pipe.bypass_all, !atomic_load(&pipe.bypass_all));
+            else if (k == 'h' || k == 'H') { printf("\n"); vf_cmd_help(stdout); }
+            else if (k == ':' || k == ';') {
+                editing = 1; cmd_len = 0;
+                printf("\n> ");
+                fflush(stdout);
+            } else if (k >= '1' && k <= '0' + pipe.count) {
+                int fi = k - '1';
+                pipeline_set_bypass(&pipe, fi, !atomic_load(&pipe.fx[fi]->bypass));
+                printf("\n%s: %s\n", pipe.fx[fi]->name,
+                       atomic_load(&pipe.fx[fi]->bypass) ? "BYPASS" : "on");
+            }
         }
-        float pin = atomic_load_explicit(&pipe.peak_in, memory_order_relaxed);
-        float pout = atomic_load_explicit(&pipe.peak_out, memory_order_relaxed);
-        float vad = atomic_load_explicit(&pipe.vad, memory_order_relaxed);
-        char mi[24], mo[24];
-        meter(mi, sizeof mi, to_db(pin));
-        meter(mo, sizeof mo, to_db(pout));
-        printf("\r%s | IN %s | OUT %s | VAD %3d%% | underruns %u   ",
-               atomic_load(&pipe.bypass_all) ? "BYPASS" : "FILTER", mi, mo,
-               (int)(vad * 100.0f + 0.5f), atomic_load(&eng.underruns));
-        fflush(stdout);
+        if (!editing) {
+            float pin = atomic_load_explicit(&pipe.peak_in, memory_order_relaxed);
+            float pout = atomic_load_explicit(&pipe.peak_out, memory_order_relaxed);
+            float vad = atomic_load_explicit(&pipe.vad, memory_order_relaxed);
+            float gate = atomic_load_explicit(&pipe.gate_gain, memory_order_relaxed);
+            float gr = atomic_load_explicit(&pipe.comp_gr_db, memory_order_relaxed);
+            char mi[24], mo[24];
+            meter(mi, sizeof mi, to_db(pin));
+            meter(mo, sizeof mo, to_db(pout));
+            printf("\r%s | IN %s | OUT %s | VAD %3d%% | gate %3d%% | GR %5.1f dB | xr %u   ",
+                   atomic_load(&pipe.bypass_all) ? "BYPASS" : "FILTER", mi, mo,
+                   (int)(vad * 100.0f + 0.5f), (int)(gate * 100.0f + 0.5f), (double)gr,
+                   atomic_load(&eng.underruns));
+            fflush(stdout);
+        }
         vf_sleep_ms(50);
     }
 
