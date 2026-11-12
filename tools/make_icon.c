@@ -1,6 +1,6 @@
 /* make_icon: writes a multi-size Windows .ico (16..256 px, 32-bit BMP entries)
- * from vf_icon_render(), and optionally a PNG-like preview as raw TGA.
- *   make_icon assets/mic-thingy.ico [preview.tga]
+ * from vf_icon_render(), plus any number of PNG renders named <name>-<size>.png.
+ *   make_icon assets/mic-thingy.ico assets/logo-1024.png assets/logo-256.png
  * Run once after changing the artwork; the .ico is committed and compiled into
  * the executables via assets/mic-thingy.rc. */
 #include <stdio.h>
@@ -8,6 +8,9 @@
 #include <string.h>
 
 #include "app/icon_art.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "external/stb_image_write.h"     /* from raylib (third_party/raylib/src) */
 
 static void w16(FILE *f, unsigned v) { fputc(v & 255, f); fputc((v >> 8) & 255, f); }
 static void w32(FILE *f, unsigned v) { w16(f, v & 0xFFFF); w16(f, v >> 16); }
@@ -53,18 +56,14 @@ int main(int argc, char **argv)
     fclose(f);
     printf("wrote %s (%d sizes)\n", argv[1], n);
 
-    if (argc > 2) {                                                   /* 256 px preview as TGA */
-        const int s = 256;
+    for (int a = 2; a < argc; a++) {                                  /* extra PNGs: name-<size>.png */
+        const char *name = argv[a];
+        const char *dash = strrchr(name, '-');
+        const int s = dash ? atoi(dash + 1) : 0;
+        if (s < 16 || s > 4096) { fprintf(stderr, "skip %s (want name-<size>.png)\n", name); continue; }
         unsigned char *px = (unsigned char *)malloc((size_t)s * s * 4);
         vf_icon_render(px, s, 1);
-        FILE *t = fopen(argv[2], "wb");
-        if (t) {
-            unsigned char h[18] = { 0, 0, 2 };
-            h[12] = s & 255; h[13] = s >> 8; h[14] = s & 255; h[15] = s >> 8; h[16] = 32; h[17] = 0x28;
-            fwrite(h, 1, 18, t);
-            for (int k = 0; k < s * s; k++) { fputc(px[4 * k + 2], t); fputc(px[4 * k + 1], t); fputc(px[4 * k], t); fputc(px[4 * k + 3], t); }
-            fclose(t);
-        }
+        if (stbi_write_png(name, s, s, 4, px, s * 4)) printf("wrote %s\n", name);
         free(px);
     }
     return 0;

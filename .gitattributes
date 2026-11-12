@@ -1,0 +1,10 @@
+# Normalise text files to LF in the repository; check out with the platform's native endings.
+* text=auto
+*.c   text
+*.h   text
+*.md  text
+*.txt text
+*.ps1 text eol=crlf
+*.rc.in text
+*.png binary
+*.ico binary

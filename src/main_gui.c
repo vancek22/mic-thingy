@@ -274,10 +274,17 @@ static void background(void)
 
 /* ------------------------------------------------------------------ helpers */
 
-static void build_list(char *out, size_t cap, const VfDeviceList *l)
+static int g_demo;   /* --demo: generic device names, for public screenshots */
+
+static void build_list(char *out, size_t cap, const VfDeviceList *l, const char *demo_label)
 {
     out[0] = '\0';
     size_t len = 0;
+    if (g_demo) {
+        for (int i = 0; i < l->count && len + 64 < cap; i++)
+            len += (size_t)snprintf(out + len, cap - len, i ? ";%s %d (USB Audio)" : "%s (USB Audio)", demo_label, i + 1);
+        return;
+    }
     for (int i = 0; i < l->count && len + 8 < cap; i++) {
         char name[NAME_MAX_CHARS + 8];
         int n = 0, chars = 0;
@@ -388,7 +395,7 @@ static void fill_device_names(VfSettings *st, const VfSession *s, int in, int ou
 
 int main(int argc, char **argv)
 {
-    int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0;
+    int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0, demo = 0;
     const char *in_file = NULL, *shot = NULL, *lang_arg = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--autostart")) autostart = 1;
@@ -399,6 +406,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--lang") && i + 1 < argc) lang_arg = argv[++i];
         else if (!strcmp(argv[i], "--verbose")) verbose = 1;
         else if (!strcmp(argv[i], "--minimized")) minimized = 1;
+        else if (!strcmp(argv[i], "--demo")) demo = 1;
     }
 
     /* One mic thingy at a time: a second launch (e.g. autostart + manual) would
@@ -445,6 +453,11 @@ int main(int argc, char **argv)
         SetWindowIcon(icon);
         vf_window_style_titlebar(GetWindowHandle(), 0x3A445C, 0xDCE6F5, 0x2A3140);
     }
+    static unsigned char logo_px[128 * 128 * 4];      /* header logo, drawn at 36 px */
+    vf_icon_render(logo_px, 128, 1);
+    Texture2D logo_tex = LoadTextureFromImage((Image){ logo_px, 128, 128, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 });
+    GenTextureMipmaps(&logo_tex);
+    SetTextureFilter(logo_tex, TEXTURE_FILTER_TRILINEAR);
     if (vf_autostart_migrate()) autostart_on = 1;   /* old "VoiceFilter" entry -> this exe */
     load_fonts();
     apply_style();
@@ -466,8 +479,9 @@ int main(int argc, char **argv)
     int sel_lang = (int)vf_i18n_get();
     int edit_in = 0, edit_out = 0, edit_preset = 0, edit_name = 0;
     static char list_in[LIST_CHARS], list_out[LIST_CHARS], list_presets[LIST_CHARS];
-    build_list(list_in, sizeof list_in, &s.caps);
-    build_list(list_out, sizeof list_out, &s.plays);
+    g_demo = demo;
+    build_list(list_in, sizeof list_in, &s.caps, "Microphone");
+    build_list(list_out, sizeof list_out, &s.plays, "Speakers");
     static VfPresetInfo presets[VF_MAX_PRESETS];
     int n_presets = 0, sel_preset = 0, shown_preset = 0;
     build_preset_list(list_presets, sizeof list_presets, presets, &n_presets);
@@ -535,8 +549,8 @@ int main(int argc, char **argv)
                         if ((k = find_name(&s.caps, n_in)) >= 0) sel_in = k;
                         if ((k = find_name(&s.plays, n_out)) >= 0) sel_out = k;
                         if ((k = find_name(&s.plays, n_mon)) >= 0) sel_mon = k;
-                        build_list(list_in, sizeof list_in, &s.caps);
-                        build_list(list_out, sizeof list_out, &s.plays);
+                        build_list(list_in, sizeof list_in, &s.caps, "Microphone");
+                        build_list(list_out, sizeof list_out, &s.plays, "Speakers");
                     }
                 }
                 VfSessionConfig c;
@@ -592,10 +606,12 @@ int main(int argc, char **argv)
         if (edit_in || edit_out || edit_preset) GuiLock();
 
         /* ---- header: logo, subtitle, language ---- */
-        glow_text(F.title, "MIC THINGY", 18, 8, C_NEON);
+        DrawTexturePro(logo_tex, (Rectangle){ 0, 0, (float)logo_tex.width, (float)logo_tex.height },
+                       (Rectangle){ 12, 6, 36, 36 }, (Vector2){ 0, 0 }, 0, WHITE);
+        glow_text(F.title, "MIC THINGY", 58, 8, C_NEON);
         const float logo_w = MeasureTextEx(F.title, "MIC THINGY", (float)F.title.baseSize, 0).x;
-        text(F.lcd, "v1.0", 26 + logo_w, 12, C_TEXT_DIM);
-        text(F.ui, tr(S_SUBTITLE), 26 + logo_w, 26, C_TEXT);
+        text(F.lcd, "v1.0", 66 + logo_w, 12, C_TEXT_DIM);
+        text(F.ui, tr(S_SUBTITLE), 66 + logo_w, 26, C_TEXT);
         {   /* blinking "power" LED */
             const int on = s.running && ((int)(GetTime() * 2) % 2 || !atomic_load(&s.pipe.bypass_all));
             DrawCircle(WIN_W - 128, 24, 6, on ? C_NEON : C_SEG_OFF);
@@ -608,8 +624,8 @@ int main(int argc, char **argv)
             vf_i18n_set((VfLang)lang);
             snprintf(st.language, sizeof st.language, "%s", vf_lang_code((VfLang)lang));
             build_preset_list(list_presets, sizeof list_presets, presets, &n_presets);
-            build_list(list_in, sizeof list_in, &s.caps);
-            build_list(list_out, sizeof list_out, &s.plays);
+            build_list(list_in, sizeof list_in, &s.caps, "Microphone");
+            build_list(list_out, sizeof list_out, &s.plays, "Speakers");
             note[0] = '\0';
         }
 
@@ -920,6 +936,7 @@ int main(int argc, char **argv)
     }
     vf_tray_stop();
     vf_session_free(&s);
+    UnloadTexture(logo_tex);
     unload_fonts();
     CloseWindow();
     free(file_buf);

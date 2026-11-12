@@ -1,66 +1,79 @@
-# mic thingy
+<p align="center"><img src="assets/logo-256.png" width="160" alt="mic thingy logo"></p>
 
-Filtr mikrofonu w czasie rzeczywistym (C11, Windows 11 + Linux/PipeWire), w stylu NVIDIA Broadcast / SteelSeries Sonar.
+<h1 align="center">mic thingy</h1>
+
+<p align="center">Real-time microphone filter for Windows 11 and Linux (PipeWire), written in C11.<br>
+Noise removal, voice-activated gate, compressor, EQ and limiter, routed to a virtual microphone -
+in the spirit of NVIDIA Broadcast / SteelSeries Sonar, but small, open and hackable.</p>
+
+<p align="center"><a href="README.pl.md">Polski</a> · MIT License</p>
+
+![mic thingy screenshot](assets/screenshot.png)
+
+## Features
+
+- **Processing chain** (48 kHz, 10 ms frames):
+  `mic → high-pass 80 Hz → RNNoise → VAD-driven noise gate → compressor → 3-band EQ → limiter → output`
+- **Virtual microphone**: Windows via [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) (apps select "CABLE Output");
+  Linux via a native PipeWire source "mic thingy microphone" (no extra software).
+- **Monitor**: listen to the processed voice on headphones while it goes to the virtual mic.
+- **GUI** (raylib + raygui, early-2000s look): every effect with on/off and sliders, click a value to type an exact
+  number, mouse wheel for fine steps, LED meters, voice-activity meter with a draggable gate threshold, latency readout.
+- **Presets** (built-in + your own), settings saved automatically, **English / Polish** UI.
+- **Runs in the background**: start with the system, tray icon, close-to-tray, single instance, automatic restart
+  when an audio device disappears.
+- **Console version** (`mic-thingy-cli`) with live parameter commands, and offline test tools.
+- Real-time safe audio path: no allocation, locks or I/O in the callback; parameters via atomics, meters via a
+  lock-free ring buffer.
+
+## Building
+
+Windows (MinGW-w64 GCC, CMake, Ninja):
 
 ```
-mikrofon → high-pass → RNNoise → bramka (VAD) → kompresor → korektor 3-pasmowy → limiter → wyjście
-```
-
-Wyjście: słuchawki, **wirtualny mikrofon** (Windows: VB-Cable, w aplikacji wybierasz „CABLE Output”;
-Linux: źródło PipeWire „mic thingy microphone”) albo wirtualny mikrofon + odsłuch na słuchawkach.
-
-## Budowanie
-
-Windows (MinGW-w64 GCC, CMake, Ninja — `winget install BrechtSanders.WinLibs.POSIX.UCRT Kitware.CMake Ninja-build.Ninja`):
-
-```
+winget install BrechtSanders.WinLibs.POSIX.UCRT Kitware.CMake Ninja-build.Ninja
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
 ```
 
-Linux (Debian/Ubuntu):
+Linux (Debian / Ubuntu):
 
 ```
 sudo apt install build-essential cmake ninja-build pkg-config libpipewire-0.3-dev \
      libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build && ctest --test-dir build
 ```
 
 Fedora: `gcc cmake ninja-build pkgconf pipewire-devel libX11-devel libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel mesa-libGL-devel`.
 
-Opcje CMake: `-DVF_GUI=OFF` (bez GUI), `-DVF_PIPEWIRE=OFF` (Linux bez wirtualnego mikrofonu).
+CMake options: `-DVF_GUI=OFF` (no GUI), `-DVF_PIPEWIRE=OFF` (Linux without the virtual microphone).
+All dependencies are vendored in `third_party/` - no downloads during the build.
 
-## Użycie
+> The Linux build (PipeWire source, X11 GUI) has not been tested on real hardware yet - reports welcome.
 
-- `build/mic-thingy` — GUI (domyślnie po angielsku, przełącznik EN/PL w prawym górnym rogu): urządzenia,
-  tryb wyjścia, suwaki efektów, wskaźniki, presety, autostart.
-  Ustawienia zapisują się same (`%APPDATA%\mic thingy\settings.ini`, `~/.config/mic-thingy/settings.ini`),
-  presety użytkownika w podkatalogu `presets/`. Wartość każdego suwaka można kliknąć i wpisać dokładnie (Enter),
-  kółko myszy nad suwakiem zmienia ją o 1% (z Shift o 0,1%), a próg głosu można przeciągać na wskaźniku VAD po lewej.
-  Ustawienia ze starej wersji (VoiceFilter) przenoszą się same przy pierwszym uruchomieniu.
-- **Praca w tle:** zaznacz „Start z systemem” — po zalogowaniu mic thingy uruchomi się schowany w zasobniku
-  (ikona monitora z falami przy zegarze) i od razu zacznie filtrować. Z „Działaj w tle” zamknięcie okna (X) tylko je chowa;
-  filtr działa dalej, dopóki nie wybierzesz „Zakończ mic thingy” z menu ikony (prawy przycisk). Kliknięcie ikony
-  lub ponowne uruchomienie programu pokazuje okno. Po odłączeniu urządzenia program sam próbuje je ponownie otworzyć.
-  Na Linuksie nie ma ikony w zasobniku — okno zamiast tego się minimalizuje.
-- `build/mic-thingy-cli` — wersja konsolowa (`--help`): `--vmic`, `--monitor N`, `--preset NAZWA`,
-  klawisze `b` (bypass), `1..6` (efekty), `:` (komendy `show`, `set comp ratio 4`, `bypass gate`, `reset`).
-- Narzędzia testowe: `mic-thingy-file` (przetwarzanie pliku), `vf-eval` (pomiary), `vf-latency`, `vf-record`
-  — opis w `CLAUDE.md`.
+## Usage
 
-## Opóźnienie
+- `build/mic-thingy` - the GUI. Pick your microphone and an output mode, switch **Audio: ON**.
+  For the virtual mic select "CABLE Output" (Windows) or "mic thingy microphone" (Linux) in Discord / OBS / Zoom.
+  Settings live in `%APPDATA%\mic thingy\settings.ini` or `~/.config/mic-thingy/settings.ini`.
+- `build/mic-thingy-cli --help` - console version: `--vmic`, `--monitor N`, `--preset NAME`;
+  keys `b` (bypass), `1..6` (toggle effects), `:` for commands such as `set comp ratio 4`.
+- Developer tools: `mic-thingy-file` (process a WAV through the chain), `vf-eval` (objective metrics),
+  `vf-latency` (round-trip measurement through VB-Cable), `vf-record`, `make_icon` - see [CLAUDE.md](CLAUDE.md).
 
-Przetwarzanie dodaje ok. 11,5 ms (RNNoise 10 ms + limiter 1,5 ms). Całość z buforami WASAPI i VB-Cable
-to zwykle 50–100 ms — cel 20 ms nie jest osiągalny w trybie współdzielonym WASAPI z VB-Cable.
-Szczegóły pomiarów: `CLAUDE.md`.
+## Latency
 
-## Licencje i podziękowania
+The DSP chain adds about 11.5 ms (RNNoise 10 ms with our look-ahead patch, limiter 1.5 ms).
+End to end through WASAPI shared mode and VB-Cable it is typically 50-100 ms; the cable and the
+Windows audio buffers dominate. Measurements and the reasoning behind every default are in [CLAUDE.md](CLAUDE.md).
 
-| Biblioteka | Licencja | |
-|---|---|---|
-| [miniaudio](https://miniaud.io) 0.11.26 | public domain / MIT-0 | `third_party/miniaudio/LICENSE` |
-| [RNNoise](https://github.com/xiph/rnnoise) v0.2 (Xiph.Org, Jean-Marc Valin) | BSD-3-Clause | `third_party/rnnoise/COPYING`, zmiany: `third_party/rnnoise/PATCHES.md` |
-| [raylib](https://www.raylib.com) 5.5 | zlib | `third_party/raylib/LICENSE` |
-| [raygui](https://github.com/raysan5/raygui) 4.0 | zlib | `third_party/raygui/LICENSE` |
+## Contributing
 
-Wszystkie licencje są permisywne. Przy dystrybucji binarnej dołącz treść licencji BSD RNNoise.
+Issues and pull requests are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+mic thingy is released under the [MIT License](LICENSE).
+Bundled libraries (miniaudio, RNNoise, raylib, GLFW, stb, raygui) keep their own permissive licenses -
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
