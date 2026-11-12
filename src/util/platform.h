@@ -18,6 +18,12 @@ int   vf_replace_file(const char *tmp, const char *dst);   /* atomic-ish rename 
  * Created if missing. The VF_CONFIG_DIR environment variable overrides it (tests). */
 int vf_config_dir(char *out, size_t n);
 
+/* <Documents>/mic thingy (recordings, exported presets); created if missing. Falls back to the config dir. */
+int vf_documents_dir(char *out, size_t n);
+
+/* 1 while the session is locked / the secure desktop is shown (Windows); always 0 elsewhere. */
+int vf_screen_locked(void);
+
 /* Calls fn(name, user) for every regular file in dir ending with `ext` (e.g. ".ini");
  * `name` is the file name without the extension. Returns the number of files. */
 int vf_list_files(const char *dir, const char *ext, void (*fn)(const char *name, void *user), void *user);

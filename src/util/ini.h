@@ -19,5 +19,6 @@ int  vf_ini_parse(VfIni *ini, const char *text);      /* from memory */
 void vf_ini_free(VfIni *ini);
 const char *vf_ini_get(const VfIni *ini, const char *section, const char *key);   /* NULL if absent */
 int  vf_ini_get_int(const VfIni *ini, const char *section, const char *key, int def);
+double vf_ini_get_double(const VfIni *ini, const char *section, const char *key, double def);
 
 #endif

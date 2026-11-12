@@ -45,10 +45,10 @@ static int lim_init(Fx *fx, int sr)
 
 static void lim_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
 {
-    (void)ctx;
     LimState *s = (LimState *)fx->state;
     const float c = s->ceiling_lin;
     unsigned idx = s->idx;
+    float gmin = 1.0f;                            /* deepest gain reduction of this frame (meter) */
     for (int i = 0; i < n; i++, idx++) {
         const unsigned w = idx & MASK;
         const float x = buf[i];
@@ -66,12 +66,14 @@ static void lim_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
 
         const float g = s->d > 0 ? (float)(s->sum / s->d) : m;
         s->env = g < s->env ? g : g + s->rel * (s->env - g);
+        if (s->env < gmin) gmin = s->env;
 
         float y = s->dly[(idx - (unsigned)s->d) & MASK] * s->env;
         if (y > c) y = c; else if (y < -c) y = -c;   /* float round-off safety */
         buf[i] = y;
     }
     s->idx = idx;
+    if (gmin < ctx->limiter_gain) ctx->limiter_gain = gmin;
 }
 
 static void lim_set_param(Fx *fx, int id, float v)

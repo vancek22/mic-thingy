@@ -3,12 +3,14 @@
 #ifndef VF_MONITOR_H
 #define VF_MONITOR_H
 
+#include <stdatomic.h>
 #include "miniaudio.h"
 #include "audio/sink.h"
 
 typedef struct VfMonitor {
     ma_device dev;
-    VfSink *sink;
+    _Atomic(VfSink *) sink;            /* source; may be switched while running (call vf_sink_flush on the new one first) */
+    _Atomic float gain;                /* linear output gain */
     int ready;
 } VfMonitor;
 

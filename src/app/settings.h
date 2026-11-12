@@ -10,6 +10,7 @@
 #define VF_SETTINGS_H
 
 #include <stdio.h>
+#include "app/appwatch.h"
 #include "dsp/pipeline.h"
 #include "util/ini.h"
 #include "util/platform.h"
@@ -22,6 +23,32 @@ typedef struct VfSettings {
     int  background;           /* closing the window keeps mic thingy running (tray) */
     char preset[64];           /* built-in key ("default", "podcast"...) or user preset name */
     char language[8];          /* "en" (default) or "pl" */
+
+    /* own-voice monitor */
+    float monitor_gain_db;
+    int   monitor_raw;
+    /* look and window */
+    char  theme[16];           /* theme id, see app/theme.h */
+    int   compact;             /* small always-on-top meter window */
+    int   overlay;             /* in-game microphone indicator (Windows) */
+    int   overlay_corner;      /* 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right */
+    int   win_x, win_y, cwin_x, cwin_y;   /* window positions (normal / compact), -32000 = not stored */
+    /* behaviour */
+    int   per_mic;             /* separate effect settings for every microphone */
+    int   auto_mute_lock;      /* mute while the screen is locked */
+    int   auto_mute_idle_min;  /* mute after this many minutes without speech, 0 = off */
+    /* mix bus */
+    float board_gain_db, sys_gain_db, sys_duck_db;
+    int   sys_enabled;
+    char  sys_device[256];
+    char  board_path[8][260];  /* soundboard clips by path */
+    /* hotkeys (text, see app/hotkeys.h) */
+    char  hk_mute[48], hk_ptt[48], hk_bypass[48], hk_board[8][48];
+    int   ptt_enabled;         /* push-to-talk: muted unless the PTT key is held */
+    /* per-application presets */
+    int   apps_enabled;
+    VfAppRule apps[VF_MAX_APP_RULES];
+    int   n_apps;
 } VfSettings;
 
 void vf_settings_defaults(VfSettings *s);
@@ -34,6 +61,19 @@ int  vf_settings_save(const VfSettings *s, const Pipeline *p, const char *path);
 void vf_fx_write_ini(FILE *f, const Pipeline *p);
 void vf_fx_apply_ini(Pipeline *p, const VfIni *ini);   /* keys present only; values clamped */
 void vf_fx_reset(Pipeline *p);                         /* defaults, all effects enabled */
+
+/* Text form of the [fx.*] sections (export, clipboard). Returns the length, -1 if buf is too small. */
+int  vf_fx_to_text(const Pipeline *p, char *buf, size_t n);
+int  vf_preset_export_text(const Pipeline *p, const char *name, char *buf, size_t n);
+/* Applies a preset given as text (an exported preset or a preset file's contents). Returns the number
+ * of recognised keys, or -1 if the text holds none (then nothing is changed). */
+int  vf_preset_import_text(Pipeline *p, const char *text);
+
+/* Per-microphone effect settings (profiles/<microphone>.ini in the config folder). */
+int  vf_profile_exists(const char *device);
+int  vf_profile_save(const Pipeline *p, const char *device);   /* 0 = ok */
+int  vf_profile_load(Pipeline *p, const char *device);         /* 0 = applied, -1 = no profile */
+int  vf_profile_delete(const char *device);                    /* 0 = deleted */
 
 /* presets */
 #define VF_MAX_PRESETS 64

@@ -77,6 +77,16 @@ void vf_settings_defaults(VfSettings *s)
     s->start_processing = 0;
     copy(s->preset, sizeof s->preset, "default");
     copy(s->language, sizeof s->language, "en");
+    s->monitor_gain_db = -6.0f;
+    s->monitor_raw = 0;
+    snprintf(s->theme, sizeof s->theme, "graphite");
+    s->overlay_corner = 1;
+    s->win_x = s->win_y = s->cwin_x = s->cwin_y = -32000;
+    s->board_gain_db = 0.0f; s->sys_gain_db = -6.0f; s->sys_duck_db = -12.0f;
+    snprintf(s->hk_mute, sizeof s->hk_mute, "ctrl+alt+m");
+    snprintf(s->hk_ptt, sizeof s->hk_ptt, "none");
+    snprintf(s->hk_bypass, sizeof s->hk_bypass, "none");
+    for (int i = 0; i < 8; i++) snprintf(s->hk_board[i], sizeof s->hk_board[i], "none");
 }
 
 int vf_settings_path(char *out, size_t n)
@@ -169,6 +179,53 @@ int vf_settings_load(VfSettings *s, Pipeline *p, const char *path)
     if (pr) copy(s->preset, sizeof s->preset, vf_preset_key(pr));   /* old files stored Polish names */
     const char *lang = vf_ini_get(&ini, "app", "language");
     if (lang) copy(s->language, sizeof s->language, lang);
+    s->monitor_gain_db = (float)vf_ini_get_double(&ini, "audio_extra", "monitor_gain_db", s->monitor_gain_db);
+    s->monitor_raw = vf_ini_get_int(&ini, "audio_extra", "monitor_raw", s->monitor_raw) != 0;
+    copy(s->theme, sizeof s->theme, vf_ini_get(&ini, "app", "theme"));
+    if (!s->theme[0]) snprintf(s->theme, sizeof s->theme, "graphite");
+    s->compact = vf_ini_get_int(&ini, "app", "compact", s->compact) != 0;
+    s->overlay = vf_ini_get_int(&ini, "app", "overlay", s->overlay) != 0;
+    s->overlay_corner = vf_ini_get_int(&ini, "app", "overlay_corner", s->overlay_corner) & 3;
+    s->win_x = vf_ini_get_int(&ini, "window", "x", s->win_x);
+    s->win_y = vf_ini_get_int(&ini, "window", "y", s->win_y);
+    s->cwin_x = vf_ini_get_int(&ini, "window", "compact_x", s->cwin_x);
+    s->cwin_y = vf_ini_get_int(&ini, "window", "compact_y", s->cwin_y);
+    s->per_mic = vf_ini_get_int(&ini, "app", "per_mic_profiles", s->per_mic) != 0;
+    s->auto_mute_lock = vf_ini_get_int(&ini, "app", "auto_mute_lock", s->auto_mute_lock) != 0;
+    s->auto_mute_idle_min = vf_ini_get_int(&ini, "app", "auto_mute_idle_min", s->auto_mute_idle_min);
+    if (s->auto_mute_idle_min < 0 || s->auto_mute_idle_min > 600) s->auto_mute_idle_min = 0;
+    s->board_gain_db = (float)vf_ini_get_double(&ini, "mix", "board_gain_db", s->board_gain_db);
+    s->sys_gain_db = (float)vf_ini_get_double(&ini, "mix", "sys_gain_db", s->sys_gain_db);
+    s->sys_duck_db = (float)vf_ini_get_double(&ini, "mix", "sys_duck_db", s->sys_duck_db);
+    s->sys_enabled = vf_ini_get_int(&ini, "mix", "sys_enabled", s->sys_enabled) != 0;
+    copy(s->sys_device, sizeof s->sys_device, vf_ini_get(&ini, "mix", "sys_device"));
+    char key[16];
+    for (int i = 0; i < 8; i++) {
+        snprintf(key, sizeof key, "slot%d", i + 1);
+        copy(s->board_path[i], sizeof s->board_path[i], vf_ini_get(&ini, "board", key));
+        snprintf(key, sizeof key, "board%d", i + 1);
+        const char *h = vf_ini_get(&ini, "hotkeys", key);
+        if (h) copy(s->hk_board[i], sizeof s->hk_board[i], h);
+    }
+    {
+        const char *h;
+        if ((h = vf_ini_get(&ini, "hotkeys", "mute"))) copy(s->hk_mute, sizeof s->hk_mute, h);
+        if ((h = vf_ini_get(&ini, "hotkeys", "ptt"))) copy(s->hk_ptt, sizeof s->hk_ptt, h);
+        if ((h = vf_ini_get(&ini, "hotkeys", "bypass"))) copy(s->hk_bypass, sizeof s->hk_bypass, h);
+    }
+    s->ptt_enabled = vf_ini_get_int(&ini, "hotkeys", "ptt_enabled", s->ptt_enabled) != 0;
+    s->apps_enabled = vf_ini_get_int(&ini, "apps", "enabled", s->apps_enabled) != 0;
+    s->n_apps = 0;
+    for (int i = 0; i < VF_MAX_APP_RULES; i++) {
+        snprintf(key, sizeof key, "rule%d", i + 1);
+        const char *r = vf_ini_get(&ini, "apps", key);
+        const char *bar = r ? strchr(r, '|') : NULL;              /* "program.exe|preset" */
+        if (!r || !bar || bar == r) continue;
+        VfAppRule *ar = &s->apps[s->n_apps];
+        snprintf(ar->exe, sizeof ar->exe, "%.*s", (int)(bar - r), r);
+        snprintf(ar->preset, sizeof ar->preset, "%s", bar + 1);
+        s->n_apps++;
+    }
     if (p) {
         vf_fx_apply_ini(p, &ini);
         atomic_store(&p->bypass_all, s->bypass);
@@ -188,6 +245,18 @@ int vf_settings_save(const VfSettings *s, const Pipeline *p, const char *path)
                "\n[app]\nlanguage = %s\nstart_processing = %d\nbackground = %d\npreset = %s\n",
             s->input, s->output, s->monitor, mode_name(s->mode), s->bypass,
             s->language, s->start_processing, s->background, s->preset);
+    fprintf(f, "theme = %s\ncompact = %d\noverlay = %d\noverlay_corner = %d\nper_mic_profiles = %d\nauto_mute_lock = %d\nauto_mute_idle_min = %d\n",
+            s->theme, s->compact, s->overlay, s->overlay_corner, s->per_mic, s->auto_mute_lock, s->auto_mute_idle_min);
+    fprintf(f, "\n[audio_extra]\nmonitor_gain_db = %.1f\nmonitor_raw = %d\n", (double)s->monitor_gain_db, s->monitor_raw);
+    fprintf(f, "\n[window]\nx = %d\ny = %d\ncompact_x = %d\ncompact_y = %d\n", s->win_x, s->win_y, s->cwin_x, s->cwin_y);
+    fprintf(f, "\n[mix]\nboard_gain_db = %.1f\nsys_gain_db = %.1f\nsys_duck_db = %.1f\nsys_enabled = %d\nsys_device = %s\n",
+            (double)s->board_gain_db, (double)s->sys_gain_db, (double)s->sys_duck_db, s->sys_enabled, s->sys_device);
+    fprintf(f, "\n[board]\n");
+    for (int i = 0; i < 8; i++) fprintf(f, "slot%d = %s\n", i + 1, s->board_path[i]);
+    fprintf(f, "\n[hotkeys]\nmute = %s\nptt = %s\nptt_enabled = %d\nbypass = %s\n", s->hk_mute, s->hk_ptt, s->ptt_enabled, s->hk_bypass);
+    for (int i = 0; i < 8; i++) fprintf(f, "board%d = %s\n", i + 1, s->hk_board[i]);
+    fprintf(f, "\n[apps]\nenabled = %d\n", s->apps_enabled);
+    for (int i = 0; i < s->n_apps; i++) fprintf(f, "rule%d = %s|%s\n", i + 1, s->apps[i].exe, s->apps[i].preset);
     if (p) vf_fx_write_ini(f, p);
     if (fclose(f) != 0) { vf_remove(tmp); return -1; }
     return vf_replace_file(tmp, path);

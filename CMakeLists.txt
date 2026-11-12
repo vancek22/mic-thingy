@@ -60,10 +60,24 @@ add_library(vfcore STATIC
   src/dsp/fx_voice.c
   src/dsp/chain.c
   src/dsp/pipeline.c
+  src/dsp/spectrum.c
   src/audio/engine.c
   src/audio/devices.c
   src/audio/sink.c
   src/audio/monitor.c
+  src/audio/sysaudio.c
+  src/app/soundboard.c
+  src/app/settings_ext.c
+  src/app/recorder.c
+  src/app/hotkeys.c
+  src/app/stats.c
+  src/app/calibrate.c
+  src/app/undo.c
+  src/app/theme.c
+  src/app/automute.c
+  src/app/appwatch.c
+  src/app/abtest.c
+  src/util/thread.c
   src/util/cmdline.c
   src/util/console.c
   src/util/ringbuf.c
@@ -159,6 +173,12 @@ if(NOT MSVC)
   target_compile_options(test_fx PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 add_test(NAME fx COMMAND test_fx)
+add_executable(test_app tests/test_app.c)
+target_link_libraries(test_app PRIVATE vfcore)
+if(NOT MSVC)
+  target_compile_options(test_app PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+add_test(NAME app COMMAND test_app)
 
 # ---------------------------------------------------------------- offline tools
 add_executable(mic-thingy-file tools/vf_file.c)

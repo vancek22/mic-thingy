@@ -16,6 +16,17 @@
 #include "audio/sink.h"
 #include "dsp/pipeline.h"
 
+typedef struct VfCapture {          /* memory capture of raw + processed audio (A/B test, calibration) */
+    float *raw, *proc;                  /* allocated by the control thread */
+    long len;                           /* capacity in samples */
+    atomic_long pos;                    /* samples captured so far (audio thread writes) */
+    atomic_int active;                  /* 1 while capturing; the audio thread clears it when full */
+} VfCapture;
+
+int  vf_capture_init(VfCapture *c, long len);     /* 0 = ok */
+void vf_capture_free(VfCapture *c);
+void vf_capture_start(VfCapture *c);              /* restarts at position 0 */
+
 #define VF_OUT_FIFO       4096   /* samples; must hold several frames */
 #define VF_DEFAULT_PERIOD 240    /* frames per device period (request; the OS may round it) */
 #define VF_MAX_TAPS       2
@@ -58,6 +69,13 @@ typedef struct Engine {
 
     atomic_uint underruns;   /* output starved after startup */
     atomic_uint overruns;    /* output FIFO overflowed */
+
+    /* Optional consumers, set by the control thread (pointers are atomic, targets outlive the stream): */
+    VfSink *pre_tap;                    /* receives the raw input frames while pre_tap_on != 0 */
+    atomic_int pre_tap_on;
+    _Atomic(VfCapture *) capture;       /* memory capture of (raw, processed) */
+    _Atomic(VfRing *) rec_ring;         /* recorder: interleaved (raw, processed) floats per frame */
+    atomic_uint rec_dropped;            /* frames the recorder could not take */
 
     /* Diagnostics written by the audio thread (relaxed atomics, read by the UI). */
     atomic_uint blk_min, blk_max, blk_last;     /* callback block size, frames */

@@ -22,6 +22,7 @@ typedef struct VfSink {
     atomic_uint dropped;     /* single samples dropped for drift */
     atomic_uint repeated;    /* single samples repeated for drift */
     atomic_int  level;       /* last fill level seen by the consumer */
+    atomic_int  flush;       /* set by any thread: the consumer discards what is buffered and re-primes */
 } VfSink;
 
 /* target: initial fill level in samples (e.g. 960 = 20 ms). 0 = ok. */
@@ -30,5 +31,5 @@ void vf_sink_free(VfSink *s);
 
 void vf_sink_write(VfSink *s, const float *src, int n);   /* producer */
 void vf_sink_read(VfSink *s, float *dst, int n);          /* consumer: always fills n */
-
+void vf_sink_flush(VfSink *s);                            /* e.g. when a consumer switches to this sink */
 #endif

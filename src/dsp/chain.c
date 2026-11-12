@@ -35,5 +35,6 @@ int chain_build(Chain *c, Pipeline *p)
                     &c->agc, &c->comp, &c->deesser, &c->eq, &c->warmth, &c->voice, &c->limiter };
     for (unsigned i = 0; i < sizeof order / sizeof order[0]; i++)
         if (pipeline_add(p, order[i]) != 0) return -1;
+    pipeline_set_mix_point(p, pipeline_find_fx(p, "limiter"));     /* mix bus + mute come right before it */
     return 0;
 }

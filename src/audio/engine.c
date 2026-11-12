@@ -1,6 +1,7 @@
 #include "audio/engine.h"
 
 #include <limits.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -10,6 +11,40 @@
 #endif
 
 /* ---- audio thread: no malloc, no locks, no I/O ---- */
+
+int vf_capture_init(VfCapture *c, long len)
+{
+    memset(c, 0, sizeof *c);
+    c->raw = (float *)calloc((size_t)len, sizeof(float));
+    c->proc = (float *)calloc((size_t)len, sizeof(float));
+    if (!c->raw || !c->proc) { vf_capture_free(c); return -1; }
+    c->len = len;
+    atomic_init(&c->pos, 0);
+    atomic_init(&c->active, 0);
+    return 0;
+}
+
+void vf_capture_free(VfCapture *c)
+{
+    free(c->raw); free(c->proc);
+    memset(c, 0, sizeof *c);
+}
+
+void vf_capture_start(VfCapture *c)
+{
+    atomic_store(&c->pos, 0);
+    atomic_store(&c->active, 1);
+}
+
+static void capture_push(VfCapture *c, const float *raw, const float *proc, int n)
+{
+    if (!atomic_load_explicit(&c->active, memory_order_acquire)) return;
+    const long pos = atomic_load_explicit(&c->pos, memory_order_relaxed);
+    if (pos + n > c->len) { atomic_store(&c->active, 0); return; }
+    memcpy(c->raw + pos, raw, (size_t)n * sizeof(float));
+    memcpy(c->proc + pos, proc, (size_t)n * sizeof(float));
+    atomic_store_explicit(&c->pos, pos + n, memory_order_release);
+}
 
 void engine_process_block(Engine *e, float *out, const float *in, unsigned frames)
 {
@@ -48,7 +83,19 @@ void engine_process_block(Engine *e, float *out, const float *in, unsigned frame
         e->in_acc[e->in_count++] = in[i];
         if (e->in_count == VF_FRAME_SIZE) {
             e->in_count = 0;
+            float raw[VF_FRAME_SIZE];
+            memcpy(raw, e->in_acc, sizeof raw);
+            if (e->pre_tap && atomic_load_explicit(&e->pre_tap_on, memory_order_relaxed))
+                vf_sink_write(e->pre_tap, raw, VF_FRAME_SIZE);
             pipeline_process(e->pipe, e->in_acc);
+            VfCapture *cap = atomic_load_explicit(&e->capture, memory_order_acquire);
+            if (cap) capture_push(cap, raw, e->in_acc, VF_FRAME_SIZE);
+            VfRing *rr = atomic_load_explicit(&e->rec_ring, memory_order_acquire);
+            if (rr) {
+                float st[2 * VF_FRAME_SIZE];
+                for (int k = 0; k < VF_FRAME_SIZE; k++) { st[2 * k] = raw[k]; st[2 * k + 1] = e->in_acc[k]; }
+                if (vf_ring_write(rr, st, 2 * VF_FRAME_SIZE) == 0) atomic_fetch_add_explicit(&e->rec_dropped, 1, memory_order_relaxed);
+            }
             for (int t = 0; t < e->ntaps; t++)
                 vf_sink_write(e->taps[t], e->in_acc, VF_FRAME_SIZE);
             if (!out) continue;
@@ -112,6 +159,10 @@ void engine_init_offline(Engine *e, Pipeline *pipe)
     e->pipe = pipe;
     atomic_init(&e->underruns, 0);
     atomic_init(&e->overruns, 0);
+    atomic_init(&e->pre_tap_on, 0);
+    atomic_init(&e->capture, NULL);
+    atomic_init(&e->rec_ring, NULL);
+    atomic_init(&e->rec_dropped, 0);
     atomic_init(&e->blk_min, UINT_MAX);
     atomic_init(&e->blk_max, 0);
     atomic_init(&e->blk_last, 0);

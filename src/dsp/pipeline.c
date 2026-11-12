@@ -11,6 +11,12 @@ void pipeline_init(Pipeline *p)
     memset(p->fx, 0, sizeof p->fx);
     p->count = 0;
     p->meter_ring = NULL;
+    atomic_init(&p->scope_ring, NULL);
+    memset(p->mix, 0, sizeof p->mix);
+    p->n_mix = 0;
+    p->mix_before = -1;
+    p->mute_gain = 1.0f;
+    atomic_init(&p->mute, 0);
     atomic_init(&p->bypass_all, 0);
     atomic_init(&p->peak_in, 0.0f);
     atomic_init(&p->peak_out, 0.0f);
@@ -30,6 +36,21 @@ int pipeline_add(Pipeline *p, Fx *fx)
     p->fx[p->count++] = fx;
     return 0;
 }
+
+int pipeline_add_mix(Pipeline *p, MixSource *src)
+{
+    if (p->n_mix >= VF_MAX_MIX || !src || !src->read) return -1;
+    atomic_init(&src->gain, 1.0f);
+    atomic_init(&src->duck, 1.0f);
+    atomic_init(&src->level, 0.0f);
+    src->duck_state = 1.0f;
+    p->mix[p->n_mix++] = src;
+    return 0;
+}
+
+void pipeline_set_mix_point(Pipeline *p, int fx_index) { p->mix_before = fx_index; }
+void pipeline_set_mute(Pipeline *p, int mute) { atomic_store(&p->mute, mute ? 1 : 0); }
+int  pipeline_get_mute(const Pipeline *p) { return atomic_load((atomic_int *)&p->mute); }
 
 int pipeline_start(Pipeline *p, int sample_rate)
 {
@@ -123,11 +144,42 @@ static float peak_of(const float *b, int n)
     return m;
 }
 
+/* Mute (10 ms ramp, voice only) and then the mix bus, in front of the limiter. */
+static void mute_and_mix(Pipeline *p, float *buf, const FxFrameCtx *ctx)
+{
+    const float target = atomic_load_explicit(&p->mute, memory_order_relaxed) ? 0.0f : 1.0f;
+    if (p->mute_gain != 1.0f || target != 1.0f) {
+        const float g0 = p->mute_gain;
+        for (int i = 0; i < VF_FRAME_SIZE; i++)
+            buf[i] *= g0 + (target - g0) * ((float)(i + 1) / (float)VF_FRAME_SIZE);
+        p->mute_gain = target;
+    }
+    const int voice = ctx->vad_valid ? ctx->vad_prob > 0.5f : p->mute_gain > 0.5f && peak_of(buf, VF_FRAME_SIZE) > 0.01f;
+    for (int m = 0; m < p->n_mix; m++) {
+        MixSource *src = p->mix[m];
+        float tmp[VF_FRAME_SIZE];
+        src->read(src->ctx, tmp, VF_FRAME_SIZE);
+        const float duck = atomic_load_explicit(&src->duck, memory_order_relaxed);
+        const float want = voice ? duck : 1.0f;
+        const float k = want < src->duck_state ? 0.5f : 0.1f;            /* quick duck, slower recovery (per frame) */
+        src->duck_state += (want - src->duck_state) * k;
+        const float g = atomic_load_explicit(&src->gain, memory_order_relaxed) * src->duck_state;
+        float pk = 0.0f;
+        for (int i = 0; i < VF_FRAME_SIZE; i++) {
+            const float v = tmp[i] * g;
+            buf[i] += v;
+            if (fabsf(v) > pk) pk = fabsf(v);
+        }
+        atomic_store_explicit(&src->level, pk, memory_order_relaxed);
+    }
+}
+
 void pipeline_process(Pipeline *p, float *buf)
 {
     FxFrameCtx ctx;
     memset(&ctx, 0, sizeof ctx);
     ctx.gate_gain = 1.0f;
+    ctx.limiter_gain = 1.0f;
 
     /* Pull changed parameters from the UI. */
     for (int i = 0; i < p->count; i++) {
@@ -141,17 +193,32 @@ void pipeline_process(Pipeline *p, float *buf)
         }
     }
 
+    float raw[VF_FRAME_SIZE];
+    struct VfRing *scope = atomic_load_explicit(&p->scope_ring, memory_order_acquire);
+    if (scope) memcpy(raw, buf, sizeof raw);
     atomic_store_explicit(&p->peak_in, peak_of(buf, VF_FRAME_SIZE), memory_order_relaxed);
 
+    int mixed = 0;
     if (!atomic_load_explicit(&p->bypass_all, memory_order_relaxed)) {
         for (int i = 0; i < p->count; i++) {
             Fx *fx = p->fx[i];
+            if (i == p->mix_before) { mute_and_mix(p, buf, &ctx); mixed = 1; }
             if (!atomic_load_explicit(&fx->bypass, memory_order_relaxed))
                 fx->process(fx, buf, VF_FRAME_SIZE, &ctx);
         }
     }
+    if (!mixed) {                       /* chain bypassed (or no mix point): same mute and bus, then a hard safety clip */
+        mute_and_mix(p, buf, &ctx);
+        for (int i = 0; i < VF_FRAME_SIZE; i++) buf[i] = buf[i] > 1.0f ? 1.0f : buf[i] < -1.0f ? -1.0f : buf[i];
+    }
 
     atomic_store_explicit(&p->peak_out, peak_of(buf, VF_FRAME_SIZE), memory_order_relaxed);
+    if (scope) {
+        float st[2 * VF_FRAME_SIZE];
+        memcpy(st, raw, sizeof raw);
+        memcpy(st + VF_FRAME_SIZE, buf, sizeof raw);
+        vf_ring_write(scope, st, 2 * VF_FRAME_SIZE);       /* dropped if the UI lags */
+    }
     atomic_store_explicit(&p->vad, ctx.vad_valid ? ctx.vad_prob : 0.0f, memory_order_relaxed);
     atomic_store_explicit(&p->gate_gain, ctx.gate_gain, memory_order_relaxed);
     atomic_store_explicit(&p->comp_gr_db, ctx.comp_gr_db, memory_order_relaxed);
@@ -166,6 +233,7 @@ void pipeline_process(Pipeline *p, float *buf)
         m[VF_M_VAD] = ctx.vad_valid ? ctx.vad_prob : 0.0f;
         m[VF_M_GATE] = ctx.gate_gain;
         m[VF_M_GR] = ctx.comp_gr_db;
+        m[VF_M_LIM] = ctx.limiter_gain;
         vf_ring_write(p->meter_ring, m, VF_METER_FIELDS);   /* dropped if the UI lags */
     }
 }

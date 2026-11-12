@@ -7,13 +7,17 @@ static void monitor_cb(ma_device *dev, void *output, const void *input, ma_uint3
 {
     (void)input;
     VfMonitor *m = (VfMonitor *)dev->pUserData;
-    vf_sink_read(m->sink, (float *)output, (int)frames);   /* lock-free, no allocation */
+    float *out = (float *)output;
+    vf_sink_read(atomic_load_explicit(&m->sink, memory_order_acquire), out, (int)frames);   /* lock-free, no allocation */
+    const float g = atomic_load_explicit(&m->gain, memory_order_relaxed);
+    if (g != 1.0f) for (ma_uint32 i = 0; i < frames; i++) out[i] *= g;
 }
 
 int vf_monitor_init(VfMonitor *m, ma_context *ctx, const ma_device_id *id, VfSink *sink)
 {
     memset(m, 0, sizeof *m);
-    m->sink = sink;
+    atomic_init(&m->sink, sink);
+    atomic_init(&m->gain, 1.0f);
     ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
     cfg.sampleRate = VF_SAMPLE_RATE;
     cfg.periodSizeInFrames = VF_FRAME_SIZE / 2;

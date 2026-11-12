@@ -9,6 +9,8 @@
 #include "audio/engine.h"
 #include "audio/monitor.h"
 #include "audio/sink.h"
+#include "audio/sysaudio.h"
+#include "app/soundboard.h"
 #include "dsp/chain.h"
 #include "dsp/pipeline.h"
 #include "util/ringbuf.h"
@@ -22,6 +24,8 @@ typedef struct VfSessionConfig {
     int playback;          /* index into plays (headphones mode), -1 = default */
     int monitor;           /* index into plays (VMIC_MONITOR mode) */
     VfOutMode mode;
+    float monitor_gain_db;  /* own-voice monitor level (applies in the monitor mode) */
+    int   monitor_raw;      /* 1 = monitor the unprocessed voice */
     int period;            /* engine period request, 0 = default */
     int periods;           /* engine periods, 0 = default (2) */
     int fixed_callback;    /* 1 = old fixed-size callbacks (A/B tests; EngineConfig) */
@@ -38,7 +42,11 @@ typedef struct VfSession {
     Pipeline pipe;
     VfRing meters;                    /* audio -> UI meter stream */
     Engine eng;
-    VfSink vmic_sink, mon_sink;
+    VfSink vmic_sink, mon_sink, pre_sink;   /* pre_sink: raw input, for the own-voice monitor */
+    int has_pre;
+    VfSoundboard board;               /* mix-bus sources, alive for the whole session object */
+    VfSysAudio sys;
+    MixSource mix_board, mix_sys;
     VfMonitor mon;
     int running, use_pw, has_mon, vmic_native;
     VfSessionConfig cfg;              /* config of the running session */
@@ -56,6 +64,14 @@ void vf_session_stop(VfSession *s);
 int  vf_session_default_mic(const VfSession *s);
 /* Underruns summed over engine, virtual mic and monitor. */
 unsigned vf_session_xruns(const VfSession *s);
+
+/* Own-voice monitor (mode "mic + monitor"): output gain in dB and raw (before the filters) or
+ * processed signal. Works while running; remembered for the next start. */
+void vf_session_monitor_set(VfSession *s, float gain_db, int raw);
+
+/* System audio (WASAPI loopback of a playback device, -1 = default) on the mix bus. */
+int  vf_session_sys_start(VfSession *s, int playback_index);
+void vf_session_sys_stop(VfSession *s);
 /* Human readable one-line latency estimate (after start). */
 void vf_session_latency_text(const VfSession *s, char *buf, int size);
 /* Name of the virtual-mic device apps should select. */

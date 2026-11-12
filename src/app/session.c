@@ -1,6 +1,7 @@
 #include "app/session.h"
 
 #include <stdio.h>
+#include <math.h>
 #include <string.h>
 #include "audio/vmic.h"
 
@@ -23,6 +24,12 @@ int vf_session_init(VfSession *s, int with_meters)
     s->ctx_ready = 1;
     if (vf_session_refresh_devices(s) != 0) return -1;
     pipeline_init(&s->pipe);
+    vf_board_init(&s->board);
+    vf_sys_init(&s->sys);
+    s->mix_board.read = vf_board_read; s->mix_board.ctx = &s->board;
+    s->mix_sys.read = vf_sys_read;     s->mix_sys.ctx = &s->sys;
+    pipeline_add_mix(&s->pipe, &s->mix_board);
+    pipeline_add_mix(&s->pipe, &s->mix_sys);
     if (chain_build(&s->chain, &s->pipe) != 0 || pipeline_start(&s->pipe, VF_SAMPLE_RATE) != 0) {
         snprintf(s->error, sizeof s->error, "Effect chain initialisation failed.");
         return -1;
@@ -37,6 +44,8 @@ int vf_session_init(VfSession *s, int with_meters)
 void vf_session_free(VfSession *s)
 {
     vf_session_stop(s);
+    vf_sys_free(&s->sys);
+    vf_board_free(&s->board);
     pipeline_stop(&s->pipe);
     if (s->pipe.meter_ring) { vf_ring_free(&s->meters); s->pipe.meter_ring = NULL; }
     if (s->ctx_ready) { ma_context_uninit(&s->ctx); s->ctx_ready = 0; }
@@ -138,6 +147,8 @@ int vf_session_start(VfSession *s, const VfSessionConfig *c)
     }
     if (s->has_mon) {
         sink_m = vf_sink_init(&s->mon_sink, VF_SINK_TARGET) == 0;
+        s->has_pre = vf_sink_init(&s->pre_sink, VF_SINK_TARGET) == 0;
+        if (s->has_pre) s->eng.pre_tap = &s->pre_sink;
         if (!sink_m || engine_add_tap(&s->eng, &s->mon_sink) != 0 ||
             vf_monitor_init(&s->mon, &s->ctx, &s->plays.dev[c->monitor].id, &s->mon_sink) != 0 ||
             vf_monitor_start(&s->mon) != 0) {
@@ -151,6 +162,7 @@ int vf_session_start(VfSession *s, const VfSessionConfig *c)
         goto fail;
     }
     s->running = 1;
+    vf_session_monitor_set(s, c->monitor_gain_db, c->monitor_raw);
     return 0;
 
 fail:
@@ -159,6 +171,7 @@ fail:
     engine_uninit(&s->eng);
     if (sink_v) vf_sink_free(&s->vmic_sink);
     if (sink_m) vf_sink_free(&s->mon_sink);
+    if (s->has_pre) { vf_sink_free(&s->pre_sink); s->has_pre = 0; }
     s->use_pw = s->has_mon = 0;
     return -1;
 }
@@ -172,6 +185,7 @@ void vf_session_stop(VfSession *s)
     engine_uninit(&s->eng);
     if (s->use_pw) vf_sink_free(&s->vmic_sink);
     if (s->has_mon) vf_sink_free(&s->mon_sink);
+    if (s->has_pre) { vf_sink_free(&s->pre_sink); s->has_pre = 0; }
     s->running = 0;
 }
 
@@ -198,3 +212,25 @@ void vf_session_latency_text(const VfSession *s, char *buf, int size)
                  l.total_ms, l.capture_ms, l.playback_ms + l.interm_ms, l.fifo_ms, l.dsp_ms,
                  s->cfg.mode != VF_OUT_HEADPHONES ? " + VB-Cable" : "");
 }
+
+void vf_session_monitor_set(VfSession *s, float gain_db, int raw)
+{
+    s->cfg.monitor_gain_db = gain_db;
+    s->cfg.monitor_raw = raw;
+    if (!s->running || !s->has_mon) return;
+    atomic_store(&s->mon.gain, powf(10.0f, gain_db * 0.05f));
+    VfSink *want = raw && s->has_pre ? &s->pre_sink : &s->mon_sink;
+    if (atomic_load(&s->mon.sink) != want) {
+        vf_sink_flush(want);                         // consumer discards the backlog, then re-primes
+        atomic_store(&s->eng.pre_tap_on, want == &s->pre_sink);
+        atomic_store(&s->mon.sink, want);
+    }
+}
+
+int vf_session_sys_start(VfSession *s, int playback_index)
+{
+    const ma_device_id *id = playback_index >= 0 && playback_index < s->plays.count ? &s->plays.dev[playback_index].id : NULL;
+    return vf_sys_start(&s->sys, &s->ctx, id);
+}
+
+void vf_session_sys_stop(VfSession *s) { vf_sys_stop(&s->sys); }

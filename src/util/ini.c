@@ -118,3 +118,12 @@ int vf_ini_get_int(const VfIni *ini, const char *section, const char *key, int d
     long r = strtol(v, &end, 10);
     return end == v ? def : (int)r;
 }
+
+double vf_ini_get_double(const VfIni *ini, const char *section, const char *key, double def)
+{
+    const char *v = vf_ini_get(ini, section, key);
+    if (!v) return def;
+    char *end;
+    const double r = strtod(v, &end);
+    return end == v ? def : r;
+}

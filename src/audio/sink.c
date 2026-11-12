@@ -20,10 +20,13 @@ int vf_sink_init(VfSink *s, int target)
     atomic_init(&s->dropped, 0);
     atomic_init(&s->repeated, 0);
     atomic_init(&s->level, 0);
+    atomic_init(&s->flush, 0);
     return 0;
 }
 
 void vf_sink_free(VfSink *s) { vf_ring_free(&s->ring); }
+
+void vf_sink_flush(VfSink *s) { atomic_store(&s->flush, 1); }
 
 void vf_sink_write(VfSink *s, const float *src, int n)
 {
@@ -33,6 +36,10 @@ void vf_sink_write(VfSink *s, const float *src, int n)
 
 void vf_sink_read(VfSink *s, float *dst, int n)
 {
+    if (atomic_exchange_explicit(&s->flush, 0, memory_order_acq_rel)) {   /* consumer-side discard */
+        vf_ring_read(&s->ring, NULL, vf_ring_available(&s->ring));
+        s->primed = 0;
+    }
     int avail = (int)vf_ring_available(&s->ring);
     atomic_store_explicit(&s->level, avail, memory_order_relaxed);
 

@@ -18,6 +18,7 @@ typedef struct FxFrameCtx {
     int   vad_valid;
     float gate_gain;         /* linear gain applied by the gate (meter) */
     float comp_gr_db;        /* compressor gain reduction in dB, <= 0 (meter) */
+    float limiter_gain;      /* lowest linear gain the limiter applied in this frame (1 = none) */
 } FxFrameCtx;
 
 typedef struct FxParamInfo {

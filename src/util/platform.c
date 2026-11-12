@@ -272,3 +272,30 @@ int vf_autostart_migrate(void)
 
 int vf_autostart_get(void) { return vf_autostart_get_named(VF_AUTOSTART_NAME); }
 int vf_autostart_set(int enable) { return vf_autostart_set_named(VF_AUTOSTART_NAME, enable); }
+
+/* ---- documents folder, lock state ---- */
+int vf_documents_dir(char *out, size_t n)
+{
+    char base[VF_PATH_MAX] = "";
+#ifdef _WIN32
+    const char *h = getenv("USERPROFILE");
+    if (h && h[0]) snprintf(base, sizeof base, "%s\\Documents\\mic thingy", h);
+#else
+    const char *h = getenv("HOME");
+    if (h && h[0]) snprintf(base, sizeof base, "%s/Documents/mic thingy", h);
+#endif
+    if (base[0] && vf_mkdir_p(base) == 0) { snprintf(out, n, "%s", base); return 0; }
+    return vf_config_dir(out, n);
+}
+
+#ifdef _WIN32
+int vf_screen_locked(void)
+{
+    HDESK d = OpenInputDesktop(0, FALSE, DESKTOP_SWITCHDESKTOP);   /* fails while the lock screen owns input */
+    if (!d) return 1;
+    CloseDesktop(d);
+    return 0;
+}
+#else
+int vf_screen_locked(void) { return 0; }
+#endif
