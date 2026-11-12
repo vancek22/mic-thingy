@@ -540,6 +540,13 @@ static void test_engine_taps(void)
     pipeline_stop(&p);
 }
 
+#ifdef _WIN32
+#include <direct.h>
+#define rmdir _rmdir
+#else
+#include <unistd.h>
+#endif
+
 static void set_env(const char *k, const char *v)
 {
 #ifdef _WIN32
@@ -670,9 +677,14 @@ static void test_settings_presets(void)
         set_env("VF_CONFIG_DIR", "");
 #ifdef _WIN32
         const char *old_dir = "vf_test_appdata\\VoiceFilter", *old_ini = "vf_test_appdata\\VoiceFilter\\settings.ini";
+        const char *new_dir = "vf_test_appdata\\mic thingy", *new_ini = "vf_test_appdata\\mic thingy\\settings.ini";
 #else
         const char *old_dir = "vf_test_appdata/voicefilter", *old_ini = "vf_test_appdata/voicefilter/settings.ini";
+        const char *new_dir = "vf_test_appdata/mic-thingy", *new_ini = "vf_test_appdata/mic-thingy/settings.ini";
 #endif
+        /* start clean: leftovers of a previous run would block the migration */
+        vf_remove(new_ini);
+        rmdir(new_dir);
         vf_mkdir_p(old_dir);
         FILE *f = vf_fopen(old_ini, "wb");
         if (f) { fputs("[app]\nlanguage = pl\n", f); fclose(f); }
@@ -685,6 +697,7 @@ static void test_settings_presets(void)
               "old VoiceFilter settings migrated to %s", dir);
         CHECK(strstr(dir, "VoiceFilter") == NULL && strstr(dir, "voicefilter") == NULL, "new dir name %s", dir);
         vf_remove(ini_path);
+        rmdir(new_dir);
         set_env("VF_CONFIG_DIR", "vf_test_config");
     }
 
