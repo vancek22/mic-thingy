@@ -28,6 +28,10 @@ typedef struct EngineConfig {
     int period_frames;                 /* <= 0: VF_DEFAULT_PERIOD. Prefer divisors of 480. */
     const float *file_src;             /* non-NULL: replaces the microphone (looped) */
     long file_len;
+    /* Experimental device knobs (L1 A/B tests; all 0 = current defaults). */
+    int no_fixed_callback;             /* miniaudio noFixedSizedCallback: no intermediary buffers */
+    int pro_audio;                     /* WASAPI: MMCSS "Pro Audio" thread class */
+    int periods;                       /* <= 0: 2 (miniaudio uses one value for capture and playback) */
 } EngineConfig;
 
 typedef struct Engine {
@@ -53,13 +57,27 @@ typedef struct Engine {
 
     atomic_uint underruns;   /* output starved after startup */
     atomic_uint overruns;    /* output FIFO overflowed */
+
+    /* Diagnostics written by the audio thread (relaxed atomics, read by the UI). */
+    atomic_uint blk_min, blk_max, blk_last;     /* callback block size, frames */
+    atomic_int  fifo_min, fifo_max;             /* output FIFO fill left after each callback */
 } Engine;
 
 typedef struct EngineLatency {
-    double capture_ms, playback_ms;   /* device buffers reported by miniaudio */
-    double fifo_ms;                   /* re-chunking FIFO pre-fill */
+    /* expected delay contributions (ms) */
+    double capture_ms;                /* one capture period (data waits for a full period) */
+    double playback_ms;               /* real playback buffer (WASAPI GetBufferSize when known) */
+    double interm_ms;                 /* miniaudio fixed-size callback buffers (capture + playback) */
+    double fifo_ms;                   /* re-chunking FIFO: largest fill seen after a callback */
     double dsp_ms;                    /* algorithmic delay of the effect chain */
     double total_ms;
+    /* raw facts for diagnostics */
+    unsigned cap_period, cap_periods, cap_buffer, cap_rate;     /* frames / count / frames / Hz */
+    unsigned play_period, play_periods, play_buffer, play_rate;
+    unsigned cap_interm, play_interm;                           /* intermediary capacity, frames */
+    unsigned blk_min, blk_max, blk_last;                        /* callback blocks seen, frames */
+    int fifo_min, fifo_max, prime;                              /* samples */
+    int wasapi;                                                 /* buffer sizes came from WASAPI */
 } EngineLatency;
 
 int  engine_init(Engine *e, ma_context *ctx, Pipeline *pipe, const EngineConfig *cfg);   /* 0 = ok */
@@ -68,6 +86,12 @@ int  engine_start(Engine *e);
 void engine_stop(Engine *e);
 void engine_uninit(Engine *e);
 void engine_latency(const Engine *e, EngineLatency *out);   /* estimate, playback path */
+/* Multi-line human readable breakdown of engine_latency() (CLI diagnostics). */
+void engine_latency_report(const Engine *e, char *buf, int size);
+
+/* Fills a device configuration exactly as engine_init() does; shared with
+ * tools/vf_latency.c so measurements use the same settings. */
+void engine_device_config(ma_device_config *cfg, ma_device_type type, const EngineConfig *c);
 
 /* The body of the audio callback, exposed so tests can drive it with
  * arbitrary block sizes without a device. `out` may be NULL (capture-only).

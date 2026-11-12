@@ -1,5 +1,7 @@
 #include "audio/engine.h"
 
+#include <limits.h>
+#include <stdio.h>
 #include <string.h>
 
 #if defined(__SSE__) || defined(_M_X64)
@@ -34,6 +36,13 @@ void engine_process_block(Engine *e, float *out, const float *in, unsigned frame
         e->started = 1;
     }
 
+    /* diagnostics: callback block sizes (relaxed atomics, single writer) */
+    atomic_store_explicit(&e->blk_last, frames, memory_order_relaxed);
+    if (frames < atomic_load_explicit(&e->blk_min, memory_order_relaxed))
+        atomic_store_explicit(&e->blk_min, frames, memory_order_relaxed);
+    if (frames > atomic_load_explicit(&e->blk_max, memory_order_relaxed))
+        atomic_store_explicit(&e->blk_max, frames, memory_order_relaxed);
+
     /* 1) capture -> accumulator -> pipeline -> taps + output FIFO */
     for (unsigned i = 0; i < frames; i++) {
         e->in_acc[e->in_count++] = in[i];
@@ -66,6 +75,11 @@ void engine_process_block(Engine *e, float *out, const float *in, unsigned frame
             atomic_fetch_add_explicit(&e->underruns, 1, memory_order_relaxed);
         }
     }
+    /* FIFO fill left over = extra delay the re-chunking adds right now */
+    if (e->out_count < atomic_load_explicit(&e->fifo_min, memory_order_relaxed))
+        atomic_store_explicit(&e->fifo_min, e->out_count, memory_order_relaxed);
+    if (e->out_count > atomic_load_explicit(&e->fifo_max, memory_order_relaxed))
+        atomic_store_explicit(&e->fifo_max, e->out_count, memory_order_relaxed);
 }
 
 static void data_callback(ma_device *dev, void *output, const void *input, ma_uint32 frames)
@@ -98,6 +112,30 @@ void engine_init_offline(Engine *e, Pipeline *pipe)
     e->pipe = pipe;
     atomic_init(&e->underruns, 0);
     atomic_init(&e->overruns, 0);
+    atomic_init(&e->blk_min, UINT_MAX);
+    atomic_init(&e->blk_max, 0);
+    atomic_init(&e->blk_last, 0);
+    atomic_init(&e->fifo_min, INT_MAX);
+    atomic_init(&e->fifo_max, 0);
+}
+
+void engine_device_config(ma_device_config *cfg, ma_device_type type, const EngineConfig *c)
+{
+    *cfg = ma_device_config_init(type);
+    cfg->sampleRate = VF_SAMPLE_RATE;
+    cfg->periodSizeInFrames = (ma_uint32)(c->period_frames > 0 ? c->period_frames : VF_DEFAULT_PERIOD);
+    cfg->periods = 2;
+    cfg->performanceProfile = ma_performance_profile_low_latency;
+    cfg->capture.pDeviceID = c->capture_id;
+    cfg->capture.format = ma_format_f32;
+    cfg->capture.channels = 1;
+    cfg->playback.pDeviceID = c->playback_id;
+    cfg->playback.format = ma_format_f32;
+    cfg->playback.channels = 1;
+    /* experimental knobs, off by default */
+    if (c->no_fixed_callback) cfg->noFixedSizedCallback = MA_TRUE;
+    if (c->pro_audio) cfg->wasapi.usage = ma_wasapi_usage_pro_audio;
+    if (c->periods > 0) cfg->periods = (ma_uint32)c->periods;
 }
 
 int engine_init(Engine *e, ma_context *ctx, Pipeline *pipe, const EngineConfig *c)
@@ -109,17 +147,8 @@ int engine_init(Engine *e, ma_context *ctx, Pipeline *pipe, const EngineConfig *
 
     ma_device_type type = c->file_src ? ma_device_type_playback
                         : c->no_playback ? ma_device_type_capture : ma_device_type_duplex;
-    ma_device_config cfg = ma_device_config_init(type);
-    cfg.sampleRate = VF_SAMPLE_RATE;
-    cfg.periodSizeInFrames = (ma_uint32)(c->period_frames > 0 ? c->period_frames : VF_DEFAULT_PERIOD);
-    cfg.periods = 2;
-    cfg.performanceProfile = ma_performance_profile_low_latency;
-    cfg.capture.pDeviceID = c->capture_id;
-    cfg.capture.format = ma_format_f32;
-    cfg.capture.channels = 1;
-    cfg.playback.pDeviceID = c->playback_id;
-    cfg.playback.format = ma_format_f32;
-    cfg.playback.channels = 1;
+    ma_device_config cfg;
+    engine_device_config(&cfg, type, c);
     cfg.dataCallback = data_callback;
     cfg.pUserData = e;
 
@@ -150,17 +179,77 @@ void engine_uninit(Engine *e)
     if (e->device_ready) { ma_device_uninit(&e->dev); e->device_ready = 0; }
 }
 
+/* Estimate of the delay the engine and the device buffers add (UI thread; the
+ * device fields are fixed after ma_device_init, the counters are relaxed atomics).
+ * Capture: a sample waits for one capture period. Playback: in WASAPI shared mode
+ * the stream keeps its buffer (GetBufferSize) nearly full - internalPeriods x
+ * internalPeriodSizeInFrames is NOT that buffer under IAudioClient3 (see miniaudio).
+ * miniaudio's fixed-size callback adds a playback intermediary of up to one
+ * callback; the capture intermediary overlaps with the capture period. */
 void engine_latency(const Engine *e, EngineLatency *out)
 {
     const ma_device *d = &e->dev;
     memset(out, 0, sizeof *out);
-    if (d->type == ma_device_type_capture || d->type == ma_device_type_duplex)
-        out->capture_ms = 1000.0 * d->capture.internalPeriodSizeInFrames *
-                          d->capture.internalPeriods / (double)d->capture.internalSampleRate;
-    if (d->type == ma_device_type_playback || d->type == ma_device_type_duplex)
-        out->playback_ms = 1000.0 * d->playback.internalPeriodSizeInFrames *
-                           d->playback.internalPeriods / (double)d->playback.internalSampleRate;
-    out->fifo_ms = 1000.0 * e->prime_samples / VF_SAMPLE_RATE;
+    const int has_cap = e->device_ready && (d->type == ma_device_type_capture || d->type == ma_device_type_duplex);
+    const int has_play = e->device_ready && (d->type == ma_device_type_playback || d->type == ma_device_type_duplex);
+    if (has_cap) {
+        out->cap_period = d->capture.internalPeriodSizeInFrames;
+        out->cap_periods = d->capture.internalPeriods;
+        out->cap_buffer = out->cap_period * out->cap_periods;
+        out->cap_rate = d->capture.internalSampleRate;
+        out->cap_interm = d->capture.intermediaryBufferCap;
+    }
+    if (has_play) {
+        out->play_period = d->playback.internalPeriodSizeInFrames;
+        out->play_periods = d->playback.internalPeriods;
+        out->play_buffer = out->play_period * out->play_periods;
+        out->play_rate = d->playback.internalSampleRate;
+        out->play_interm = d->playback.intermediaryBufferCap;
+    }
+#ifdef MA_SUPPORT_WASAPI
+    if (e->device_ready && d->pContext && d->pContext->backend == ma_backend_wasapi) {
+        out->wasapi = 1;
+        if (has_cap && d->wasapi.actualBufferSizeInFramesCapture) out->cap_buffer = d->wasapi.actualBufferSizeInFramesCapture;
+        if (has_play && d->wasapi.actualBufferSizeInFramesPlayback) out->play_buffer = d->wasapi.actualBufferSizeInFramesPlayback;
+    }
+#endif
+    out->blk_min = atomic_load_explicit(&e->blk_min, memory_order_relaxed);
+    out->blk_max = atomic_load_explicit(&e->blk_max, memory_order_relaxed);
+    out->blk_last = atomic_load_explicit(&e->blk_last, memory_order_relaxed);
+    if (out->blk_min == UINT_MAX) out->blk_min = 0;
+    out->fifo_min = atomic_load_explicit(&e->fifo_min, memory_order_relaxed);
+    out->fifo_max = atomic_load_explicit(&e->fifo_max, memory_order_relaxed);
+    if (out->fifo_min == INT_MAX) out->fifo_min = 0;
+    out->prime = e->prime_samples;
+
+    if (out->cap_rate) out->capture_ms = 1000.0 * out->cap_period / out->cap_rate;
+    if (out->play_rate) {
+        out->playback_ms = 1000.0 * out->play_buffer / out->play_rate;
+        out->interm_ms = 1000.0 * out->play_interm / out->play_rate;
+    }
+    /* before the first callbacks the FIFO stats are empty: fall back to the pre-fill */
+    const int fifo = out->blk_max ? out->fifo_max : out->prime;
+    out->fifo_ms = has_play ? 1000.0 * fifo / VF_SAMPLE_RATE : 0.0;
     out->dsp_ms = 1000.0 * pipeline_delay_samples(e->pipe) / VF_SAMPLE_RATE;
-    out->total_ms = out->capture_ms + out->playback_ms + out->fifo_ms + out->dsp_ms;
+    out->total_ms = out->capture_ms + out->playback_ms + out->interm_ms + out->fifo_ms + out->dsp_ms;
+}
+
+void engine_latency_report(const Engine *e, char *buf, int size)
+{
+    EngineLatency l;
+    engine_latency(e, &l);
+    const size_t n = (size_t)(size > 0 ? size : 0);
+    snprintf(buf, n,
+             "  capture : period %u x %u, buffer %u frames @ %u Hz -> ~%.1f ms%s\n"
+             "  playback: period %u x %u, buffer %u frames @ %u Hz -> ~%.1f ms%s\n"
+             "  miniaudio fixed-size callback buffers: capture %u, playback %u frames -> ~%.1f ms\n"
+             "  callback blocks %u..%u (last %u) frames, FIFO fill %d..%d (pre-fill %d) -> ~%.1f ms\n"
+             "  DSP %.1f ms  =>  total ~%.1f ms%s\n",
+             l.cap_period, l.cap_periods, l.cap_buffer, l.cap_rate, l.capture_ms,
+             l.cap_rate && l.cap_rate != VF_SAMPLE_RATE ? "  (device not at 48 kHz: resampling)" : "",
+             l.play_period, l.play_periods, l.play_buffer, l.play_rate, l.playback_ms,
+             l.play_rate && l.play_rate != VF_SAMPLE_RATE ? "  (device not at 48 kHz: resampling)" : "",
+             l.cap_interm, l.play_interm, l.interm_ms,
+             l.blk_min, l.blk_max, l.blk_last, l.fifo_min, l.fifo_max, l.prime, l.fifo_ms,
+             l.dsp_ms, l.total_ms, l.wasapi ? "  (buffers from WASAPI GetBufferSize)" : "");
 }

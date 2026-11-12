@@ -791,7 +791,7 @@ int main(int argc, char **argv)
                      s.use_pw ? " +PW" : sel_mode != VF_OUT_HEADPHONES ? " +CABLE" : "");
             glow_text(F.lcd_big, t, lr.x + 8, lr.y + 8, C_NEON);
             if (s.use_pw) snprintf(t, sizeof t, tr(S_LAT_PW_FMT), l.capture_ms, l.dsp_ms, sink_ms);
-            else snprintf(t, sizeof t, tr(S_LAT_FMT), l.capture_ms, l.playback_ms, l.fifo_ms, l.dsp_ms);
+            else snprintf(t, sizeof t, tr(S_LAT_FMT), l.capture_ms, l.playback_ms + l.interm_ms, l.fifo_ms, l.dsp_ms);
             SetTextLineSpacing(4);                    /* raylib: extra pixels between lines */
             DrawTextEx(F.lcd, t, (Vector2){ lr.x + 8, lr.y + 38 }, (float)F.lcd.baseSize, 0, C_TEXT_DIM);
         } else {

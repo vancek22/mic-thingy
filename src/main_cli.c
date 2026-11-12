@@ -74,12 +74,15 @@ static void usage(void)
            "  --seconds S   quit automatically after S seconds\n"
            "  -c CMD        run a console command at start, e.g. -c \"set comp ratio 4\"\n"
            "  --preset NAME apply a preset (built-in: Domyślny, Głośne otoczenie, Podcast, Naturalny)\n"
-           "  --no-config   ignore the effect settings saved by the GUI (settings.ini)\n");
+           "  --no-config   ignore the effect settings saved by the GUI (settings.ini)\n"
+           "  --latency-report  print the full buffer breakdown at start and every 5 s\n"
+           "  experimental (latency A/B tests): --periods M  --no-fixed  --pro-audio\n");
 }
 
 int main(int argc, char **argv)
 {
     int pre_in = -1, pre_out = -1, pre_mon = -1, period = 0, mode = -1, ncmd = 0, no_config = 0;
+    int periods = 0, no_fixed = 0, pro_audio = 0, lat_report = 0;
     double seconds = 0;
     const char *in_file = NULL, *cmds[MAX_CMDS], *preset = NULL;
     for (int i = 1; i < argc; i++) {
@@ -89,6 +92,10 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--vmic")) { if (mode != VF_OUT_VMIC_MONITOR) mode = VF_OUT_VMIC; }
         else if (!strcmp(argv[i], "--monitor") && more) { pre_mon = atoi(argv[++i]); mode = VF_OUT_VMIC_MONITOR; }
         else if (!strcmp(argv[i], "--period") && more) period = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--periods") && more) periods = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--no-fixed")) no_fixed = 1;
+        else if (!strcmp(argv[i], "--pro-audio")) pro_audio = 1;
+        else if (!strcmp(argv[i], "--latency-report")) lat_report = 1;
         else if (!strcmp(argv[i], "--in-file") && more) in_file = argv[++i];
         else if (!strcmp(argv[i], "--seconds") && more) seconds = atof(argv[++i]);
         else if (!strcmp(argv[i], "-c") && more && ncmd < MAX_CMDS) cmds[ncmd++] = argv[++i];
@@ -125,6 +132,9 @@ int main(int argc, char **argv)
     VfSessionConfig c;
     memset(&c, 0, sizeof c);
     c.period = period;
+    c.periods = periods;
+    c.no_fixed_callback = no_fixed;
+    c.pro_audio = pro_audio;
     c.capture = -1;
     float *file_buf = NULL;
     if (in_file) {
@@ -178,6 +188,8 @@ int main(int argc, char **argv)
                c.mode != VF_OUT_HEADPHONES ? "  -> in Discord/OBS select \"CABLE Output\" as the microphone" : "");
     if (s.has_mon) printf("  monitor: %s\n", s.plays.dev[c.monitor].name);
     printf("  latency estimate: %s\n", lat);
+    char rep[1024];
+    if (lat_report) { engine_latency_report(&s.eng, rep, sizeof rep); printf("%s", rep); }
     printf("Keys:  b = bypass all   1..%d = toggle effect   : = command   h = help   q = quit\n\n",
            s.pipe.count);
 
@@ -238,10 +250,15 @@ int main(int argc, char **argv)
             fflush(stdout);
         }
         vf_sleep_ms(50);
+        if (lat_report && !editing && ticks % 100 == 99) {
+            engine_latency_report(&s.eng, rep, sizeof rep);
+            printf("\n%s", rep);
+        }
         if (seconds > 0 && ++ticks * 0.05 >= seconds) running = 0;
     }
 
     printf("\n");
+    if (lat_report) { engine_latency_report(&s.eng, rep, sizeof rep); printf("final:\n%s", rep); }
     if (s.use_pw)
         printf("vmic sink: underruns %u, overruns %u, drift fixes -%u/+%u samples\n",
                atomic_load(&s.vmic_sink.underruns), atomic_load(&s.vmic_sink.overruns),

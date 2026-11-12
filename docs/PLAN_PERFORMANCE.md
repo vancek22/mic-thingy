@@ -47,6 +47,13 @@ Bez tego pozostałe etapy są zgadywaniem.
 - GUI/CLI: pokazać rozkład zamiast jednej liczby.
 - Wynik etapu: tabela w `CLAUDE.md` z rozbiciem obecnych 60–88 ms.
 
+**Stan L0 (2026-11-12): zrobione.** Zamiast trybu `--through` (dwa procesy bez wspólnego zegara, a RNNoise
+tłumi piski testowe) `vf-latency` konfiguruje urządzenie tą samą funkcją co silnik (`engine_device_config()`),
+a opóźnienia FIFO i DSP są znane dokładnie z ctest. Wynik: z ok. 81 ms pętli po naszej stronie jest ok. 26 ms
+(przechwytywanie 10, bufor odtwarzania 11, bufory miniaudio 5), a **50–56 ms zabiera VB-Cable i silnik audio
+Windows**. `--no-fixed` daje ok. 7 ms (mediana 81,5 → 74,2 ms), `--pro-audio` i `--period 128` – w granicach
+rozrzutu pomiaru. Liczby szczegółowo w `CLAUDE.md` (Testing, punkt 4).
+
 ### L1. Bufory urządzeń (tanie, największy zysk)
 Zmiany w `engine_init()` (`src/audio/engine.c:112`), każdą mierzyć osobno 6 przebiegami `vf-latency`:
 1. `cfg.noFixedSizedCallback = MA_TRUE` – silnik i tak przyjmuje dowolne bloki, a miniaudio przestaje

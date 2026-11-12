@@ -117,6 +117,9 @@ int vf_session_start(VfSession *s, const VfSessionConfig *c)
     ec.playback_id = pi >= 0 ? &s->plays.dev[pi].id : NULL;
     ec.no_playback = s->use_pw;
     ec.period_frames = c->period;
+    ec.periods = c->periods;
+    ec.no_fixed_callback = c->no_fixed_callback;
+    ec.pro_audio = c->pro_audio;
     ec.file_src = c->file_src;
     ec.file_len = c->file_len;
 
@@ -192,6 +195,6 @@ void vf_session_latency_text(const VfSession *s, char *buf, int size)
                  l.capture_ms, l.dsp_ms, 1000.0 * VF_SINK_TARGET / VF_SAMPLE_RATE);
     else
         snprintf(buf, (size_t)size, "~%.0f ms (capture %.0f + playback %.0f + FIFO %.0f + DSP %.1f)%s",
-                 l.total_ms, l.capture_ms, l.playback_ms, l.fifo_ms, l.dsp_ms,
+                 l.total_ms, l.capture_ms, l.playback_ms + l.interm_ms, l.fifo_ms, l.dsp_ms,
                  s->cfg.mode != VF_OUT_HEADPHONES ? " + VB-Cable" : "");
 }

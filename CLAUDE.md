@@ -54,6 +54,18 @@ Linux: `sudo apt install build-essential cmake ninja-build libpipewire-0.3-dev l
    RNNoise `lookahead 0` (our patch, third_party/rnnoise/PATCHES.md) saves 10 ms; audio matrix cost: SDR -0.6 dB,
    pause attenuation -0.8 dB, onsets -0.5 dB, real recordings unchanged. DEFAULT since 2026-11-12 (user's choice):
    chain DSP delay = 480 (RNNoise) + 72 (limiter) = 11.5 ms.
+   Latency breakdown (L0, 2026-11-12, `docs/PLAN_PERFORMANCE.md`): `engine_latency()` now reads the REAL WASAPI
+   buffers (`dev.wasapi.actualBufferSizeInFrames*`; under IAudioClient3 internalPeriods x period is not the buffer),
+   miniaudio's fixed-size callback buffers (`intermediaryBufferCap`), callback block min/max and the FIFO fill
+   (relaxed atomics in `engine_process_block`). `mic-thingy-cli --latency-report` prints it; `vf-latency` builds its
+   device with `engine_device_config()` (same as the engine) and prints "ours vs cable + OS". Experimental knobs
+   (`EngineConfig` / CLI / vf-latency): `--no-fixed` (noFixedSizedCallback), `--pro-audio` (MMCSS), `--periods M`.
+   Defaults unchanged. Measured, 6 alternating runs x 6 configs, median RTT (min..max):
+   default 81.5 (75.7..87.2) | --no-fixed 74.2 (65.0..78.1) | --pro-audio 78.4 | both 74.0 | --no-fixed --period 128
+   72.4 | --no-fixed --periods 3 76.3 ms. Buffers: capture period 480 (buffer 1056), playback buffer 528 (280 at
+   period 128), miniaudio intermediaries 240 + 240. Our side of the loop = ~26 ms; **~50-56 ms is VB-Cable + the
+   Windows audio engine** (not reachable from our code; VB-Cable "Max Latency" setting / own driver, plan section 7).
+   The WASAPI-guarded paths (`MA_SUPPORT_WASAPI`) are not compiled on Linux here - check there.
 Numbers are not a judgement of sound quality - the user listens; propose default changes, don't retune silently.
 
 ## Effect module interface (`src/dsp/fx.h`)

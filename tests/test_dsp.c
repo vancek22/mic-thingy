@@ -425,6 +425,19 @@ static void test_engine_blocks(void)
         CHECK(ur <= allowed && orun == 0, "block %u: underruns %u overruns %u", sizes[si], ur, orun);
         if (sizes[si])
             CHECK(shift == e.prime_samples, "block %u: delay %ld != prime %d", sizes[si], shift, e.prime_samples);
+        /* diagnostics counters (latency breakdown) */
+        EngineLatency el;
+        engine_latency(&e, &el);
+        if (sizes[si]) {
+            const unsigned last = (unsigned)(LAT_N % sizes[si]) ? (unsigned)(LAT_N % sizes[si]) : sizes[si];
+            CHECK(el.blk_max == sizes[si] && el.blk_min == (last < sizes[si] ? last : sizes[si]),
+                  "block %u: blocks seen %u..%u", sizes[si], el.blk_min, el.blk_max);
+            /* left-over FIFO fill stays below one frame on top of the pre-fill */
+            CHECK(el.fifo_max >= el.fifo_min && el.fifo_max < VF_FRAME_SIZE + el.prime,
+                  "block %u: fifo fill %d..%d (prime %d)", sizes[si], el.fifo_min, el.fifo_max, el.prime);
+            if (sizes[si] == VF_FRAME_SIZE) CHECK(el.fifo_max == 0, "block 480: fifo fill %d", el.fifo_max);
+        }
+        CHECK(el.capture_ms == 0 && el.playback_ms == 0, "offline engine reports device buffers");
         pipeline_stop(&p1);
         pipeline_stop(&p2);
     }
