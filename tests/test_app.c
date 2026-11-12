@@ -22,6 +22,7 @@
 #include "util/platform.h"
 #include "audio/engine.h"
 #include "audio/sink.h"
+#include "audio/vmic_shm.h"
 #include "dsp/chain.h"
 #include "dsp/fx_limiter.h"
 #include "dsp/spectrum.h"
@@ -766,6 +767,53 @@ static void test_abtest(void)
     pipeline_stop(&g_pipe);
 }
 
+static void test_vmic_shm(void)
+{
+    printf("virtual microphone shared ring (driver protocol)\n");
+    const unsigned cap = 4096;
+    VfVmicShared *s = (VfVmicShared *)malloc(vf_vmic_shm_size(cap));
+    vf_vmic_shm_init(s, cap, SR);
+    CHECK(vf_vmic_shm_valid(s) && s->capacity == cap && s->rate == (unsigned)SR, "header");
+    CHECK(!vf_vmic_shm_valid(NULL), "NULL is not valid");
+    s->magic = 0;
+    CHECK(!vf_vmic_shm_valid(s), "bad magic rejected");
+    s->magic = VF_VMIC_MAGIC;
+
+    /* the driver plays silence (and counts an underrun) while the application writes nothing */
+    float out[480];
+    for (int i = 0; i < 480; i++) out[i] = 1.0f;
+    vf_vmic_shm_consume(s, out, 480);
+    CHECK(out[0] == 0.0f && out[479] == 0.0f && atomic_load(&s->underruns) == 1, "underrun gives silence");
+
+    /* data comes out in order, across the wrap point, with odd block sizes */
+    static float a[480], b[480];
+    unsigned nw = 0, nr = 0;
+    for (int round = 0; round < 400; round++) {
+        const unsigned wn = 100 + (unsigned)(round * 37) % 380;
+        for (unsigned i = 0; i < wn; i++) a[i] = (float)((nw + i) % 1000);
+        if (vf_vmic_shm_write(s, a, wn) == wn) { nw += wn; }
+        const unsigned rn = 100 + (unsigned)(round * 53) % 380;
+        if (vf_vmic_shm_level(s) >= rn) {
+            vf_vmic_shm_consume(s, b, rn);
+            for (unsigned i = 0; i < rn; i++) {
+                if (b[i] != (float)((nr + i) % 1000)) { CHECK(0, "sample %u out of order", nr + i); round = 400; break; }
+            }
+            nr += rn;
+        }
+    }
+    CHECK(nr > 20000 && nw >= nr, "moved %u samples", nr);
+    printf("  %u samples passed the ring (several wraps), %u overruns, %u underruns\n", nr, atomic_load(&s->overruns), atomic_load(&s->underruns));
+
+    /* full ring: the block is dropped and counted, nothing is overwritten */
+    const unsigned before = vf_vmic_shm_level(s);
+    unsigned ok = 1;
+    while (ok) ok = vf_vmic_shm_write(s, a, 480);
+    CHECK(atomic_load(&s->overruns) >= 1 && vf_vmic_shm_level(s) <= cap, "full ring must drop, level %u", vf_vmic_shm_level(s));
+    (void)before;
+    CHECK(atomic_load(&s->client_alive) > 0, "heartbeat");
+    free(s);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -785,6 +833,7 @@ int main(void)
     test_recorder();
     test_spectrum_and_scope();
     test_abtest();
+    test_vmic_shm();
     printf(g_fail ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

@@ -67,6 +67,7 @@ add_library(vfcore STATIC
   src/audio/sink.c
   src/audio/monitor.c
   src/audio/sysaudio.c
+  src/audio/vmic_shm.c
   src/app/soundboard.c
   src/app/settings_ext.c
   src/app/recorder.c

@@ -22,6 +22,19 @@ in the spirit of NVIDIA Broadcast / SteelSeries Sonar, but small, open and hacka
 - **Presets** (built-in + your own), settings saved automatically, **English / Polish** UI.
 - **Runs in the background**: start with the system, tray icon, close-to-tray, single instance, automatic restart
   when an audio device disappears.
+- **Optional effects** (off until you switch them on, tabs *Extra* / *Effects*): hum remover (50/60 Hz, auto-detect),
+  room-reverb reducer, breath and keyboard-click suppressor, shout guard, auto volume (AGC), de-esser, voice warmth,
+  voice effects (pitch, robot, radio), echo cancellation (beta, needs the system-audio loopback).
+- **Low-latency mode** (preset "Low latency"): RNNoise only analyses, its gains drive a short minimum-phase filter -
+  the filter chain delay drops from 11.5 ms to under 1 ms at the price of rougher noise removal on steady noise.
+- **Tools**: own-voice monitor, system-audio mix with ducking (Windows), 8-slot soundboard (drop sound files in),
+  A/B test (record, then listen raw vs filtered), recorder (raw + filtered, stereo WAV), calibration wizard,
+  quality verdict and dropout history, spectrum analyser.
+- **Quality of life**: global mute / push-to-talk / filter hotkeys, mute on screen lock or after silence,
+  undo/redo and hold-to-compare, per-microphone settings, presets per running program, preset copy/paste/drop,
+  compact always-on-top window, in-game microphone indicator (Windows), three colour themes.
+- **Small when hidden**: in the tray the window and its OpenGL context are destroyed - about 1-3 MB of private
+  memory with the filter running (the open window needs ~70 MB, mostly the graphics driver).
 - **Console version** (`mic-thingy-cli`) with live parameter commands, and offline test tools.
 - Real-time safe audio path: no allocation, locks or I/O in the callback; parameters via atomics, meters via a
   lock-free ring buffer.

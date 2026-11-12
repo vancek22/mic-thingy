@@ -13,6 +13,23 @@ mikrofon → high-pass → RNNoise → bramka (VAD) → kompresor → korektor 3
 Wyjście: słuchawki, **wirtualny mikrofon** (Windows: VB-Cable, w aplikacji wybierasz „CABLE Output”;
 Linux: źródło PipeWire „mic thingy microphone”) albo wirtualny mikrofon + odsłuch na słuchawkach.
 
+- **Opcjonalne efekty** (wyłączone, dopóki ich nie włączysz; zakładki *Dodatkowe* / *Efekty*): usuwanie przydźwięku
+  50/60 Hz (z automatycznym wykrywaniem), redukcja pogłosu pokoju, tłumik oddechów i klikania klawiatury, ochrona
+  przed krzykiem, automatyczna głośność (AGC), de-esser, ciepło głosu, efekty głosu (wysokość, robot, radio),
+  redukcja echa (beta, wymaga przechwytywania dźwięku systemu).
+- **Tryb niskiego opóźnienia** (preset „Niskie opóźnienie”): RNNoise tylko analizuje, a jego wzmocnienia sterują
+  krótkim filtrem o minimalnej fazie - opóźnienie filtrów spada z 11,5 ms do poniżej 1 ms, kosztem mniej gładkiego
+  usuwania stałego szumu.
+- **Narzędzia**: odsłuch własnego głosu, miks dźwięku systemu z przyciszaniem (Windows), soundboard na 8 klipów
+  (upuść plik na okno), test A/B (nagraj i porównaj surowy z filtrowanym), nagrywanie (surowy + filtrowany, stereo
+  WAV), kreator kalibracji, ocena jakości i historia zacięć, analizator widma.
+- **Wygoda**: globalne skróty (wycisz / push-to-talk / filtr), wyciszenie przy blokadzie ekranu lub po ciszy,
+  cofnij/ponów i porównanie z presetem, osobne ustawienia dla każdego mikrofonu, presety dla uruchomionych
+  programów, kopiowanie i wklejanie presetów, małe okno zawsze na wierzchu, wskaźnik mikrofonu w grze (Windows),
+  trzy motywy kolorów.
+- **Mały w tle**: w trayu okno i kontekst OpenGL są niszczone - ok. 1-3 MB prywatnej pamięci przy działającym
+  filtrze (otwarte okno to ok. 70 MB, głównie sterownik grafiki).
+
 ## Budowanie
 
 Windows (MinGW-w64 GCC, CMake, Ninja — `winget install BrechtSanders.WinLibs.POSIX.UCRT Kitware.CMake Ninja-build.Ninja`):

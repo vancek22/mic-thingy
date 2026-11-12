@@ -214,3 +214,45 @@ RNNoise has no upstream CMake: built by our own target using the portable (non-x
 - Not done (reasoned): M2 two processes (tray is already ~1 MB), M3 software renderer (raylib 5.5 has none), L3 exclusive
   WASAPI (measured worse), RNNoise AVX2 (CPU is 0.8% of a core). Not done: processing the chain on device-sized blocks
   (would save the 0-5 ms FIFO but needs delayed gains).
+
+## Added 2026-11-13 (docs/PLAN_PERFORMANCE.md + docs/PLAN_FEATURES.md)
+Tests: `ctest` now runs three executables: `test_dsp` (core), `test_fx` (optional effects + AEC), `test_app` (mute/mix bus,
+soundboard, taps, hotkeys, stats, calibration, undo, automute, appwatch, themes, settings/profiles/export, recorder,
+spectrum, A/B, vmic ring). `test_app` uses `VF_CONFIG_DIR=vf_test_cfg_app` (in the build dir).
+
+**Effects** (chain order in `src/dsp/chain.h`; 14 effects, `VF_MAX_FX` 16): optional ones have `Fx.default_bypass = 1`
+(restored by `vf_fx_reset`/presets) and `Fx.page` (GUI tab 0 basic / 1 extra / 2 effects):
+aec (NLMS 2048 taps, needs reference), hum (notches, auto 50/60 via 100 ms Goertzel), dereverb (tail expander following
+the speech level), breath (VAD-based breaths + HF clicks, needs the RNNoise VAD), guard (fast shout compressor),
+agc (speech frames only), deesser (x - lowpass band split: `x - h(1-g)` with a HIGH-PASS h is wrong - phase),
+warmth (tanh + low shelf, 0 = bit exact), voice (pitch = two cross-faded delay taps, +-3% perceived pitch because of the
+sidebands; robot; radio). Tests never use effect indices - use `pipeline_find_fx`.
+
+**Pipeline** (`pipeline.[ch]`): `mute` (10 ms ramp, voice only) and the mix bus (`MixSource`: gain, duck while the
+voice is active, level meter) are applied right before the limiter (`mix_before`); with the chain bypassed the same
+mute + bus + a hard clip run. The limiter reports `ctx->limiter_gain` -> meter field `VF_M_LIM`. `scope_ring` feeds the
+spectrum analyser (UI sets/clears it). Engine hooks: `pre_tap` (raw input), `capture` (memory), `rec_ring` (recorder).
+`VfSink` has `vf_sink_flush()`; the monitor has `gain` and a switchable source (raw / processed).
+
+**App modules** (`src/app`, all pure logic and tested): soundboard (lock-free replace: `enabled`/`busy` handshake in
+`quiesce`), recorder (own thread, drops instead of blocking), abtest, hotkeys (GetAsyncKeyState polling; text form
+"ctrl+alt+m"), stats (1 s samples x 1 h, quality verdict, dropout history), calibrate, undo (+snapshots), automute
+(lock / idle; idle mute ends only by the user), appwatch (rule matching + process list), theme (data), overlay
+(Windows layered window on its own thread), settings_ext (profiles, export/import text), `util/thread`, `dsp/spectrum`.
+`src/audio/sysaudio.c`: WASAPI loopback -> two sinks (mix bus + AEC reference). `src/audio/vmic_shm.[ch]`: driver ring.
+
+**GUI**: `src/gui_tools.inc` is included by main_gui.c (one translation unit). `ui_tick()` runs every loop iteration,
+also with no window (hotkeys, mute, overlay, stats, per-program presets, per-mic profiles). Colours: `g_c[]` filled by
+`apply_theme()`; use the `C_*` macros and `mixc()`; text on dark strips goes through `on_dark()`. Compact window is its
+own drawing path (`draw_compact`). Switching theme at runtime: `retheme()` (must reset the raygui font first).
+Screenshot flags: `--tab N` (0..4), settings.ini `theme = amber|classic`, `compact = 1`.
+settings.ini gained [window] [mix] [board] [hotkeys] [apps] and app keys (theme, compact, overlay, per_mic_profiles,
+auto_mute_*), monitor keys live in [audio_extra]. Old files still load (defaults for new keys).
+
+**Echo canceller (beta)**: reference = system loopback; the program cannot know the loopback-to-microphone delay, so
+`aec delay` is manual (0-200 ms) and the 2048 taps cover 43 ms after it. Double talk: Geigel + "residual far above what a
+converged filter leaves" + 50 ms hold; latch `conv` after 1 s of > 10 dB reduction, unlatch after 10 s frozen. Synthetic
+test: ERLE > 60 dB, near-end SDR ~7 dB in double talk. Real rooms are untested; one loopback device only.
+
+**Driver**: not built (needs WDK + VM); see `driver/README.md`. **CI**: `.github/workflows/ci.yml` (never run; the Linux
+code has still never been compiled).
