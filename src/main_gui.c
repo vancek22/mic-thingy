@@ -16,6 +16,7 @@
 
 #include "app/session.h"
 #include "app/settings.h"
+#include "app/tray.h"
 #include "util/platform.h"
 #include "util/wavio.h"
 
@@ -199,7 +200,7 @@ static unsigned long long settings_hash(const VfSession *s, const VfSettings *st
 {
     unsigned long long h = 1469598103934665603ULL;
 #define MIX(x) (h = (h ^ (unsigned long long)(x)) * 1099511628211ULL)
-    MIX(a); MIX(b); MIX(c); MIX(d); MIX(st->start_processing);
+    MIX(a); MIX(b); MIX(c); MIX(d); MIX(st->start_processing); MIX(st->background);
     MIX(atomic_load(&((VfSession *)s)->pipe.bypass_all));
     for (const char *p = st->preset; *p; p++) MIX(*p);
     for (int i = 0; i < s->pipe.count; i++) {
@@ -240,6 +241,10 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--minimized")) minimized = 1;
     }
 
+    /* One VoiceFilter at a time: a second launch (e.g. autostart + manual) would
+     * open the microphone twice and feed the virtual mic twice. */
+    if (!shot && !vf_single_instance()) return 0;     /* the running one shows its window */
+
     static VfSession s;
     int init_ok = vf_session_init(&s, 1) == 0;
 
@@ -255,11 +260,20 @@ int main(int argc, char **argv)
     long file_len = 0;
     if (in_file) file_buf = vf_wav_read_mono(in_file, VF_SAMPLE_RATE, &file_len);
 
-    SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
+    /* Background mode: closing the window hides it to the tray icon (Windows) or
+     * minimizes it (no tray available); audio keeps running until "Zakończ". */
+    const int tray_ok = !shot && vf_tray_start() == 0;
+    const int start_hidden = minimized && st.background && tray_ok;
+
+    SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | (start_hidden ? FLAG_WINDOW_HIDDEN : 0));
     SetTraceLogLevel(verbose ? LOG_INFO : LOG_WARNING);
     InitWindow(WIN_W, WIN_H, "VoiceFilter");
+    TraceLog(LOG_INFO, "VoiceFilter: tray %s, background %d, start hidden %d",
+             tray_ok ? "ok" : "unavailable", st.background, start_hidden);
+    SetWindowState(FLAG_WINDOW_ALWAYS_RUN);       /* keep the loop alive while minimized/hidden */
+    SetExitKey(KEY_NULL);                         /* Esc must not quit */
     SetTargetFPS(60);
-    if (minimized) MinimizeWindow();
+    if (minimized && !start_hidden) MinimizeWindow();
     /* Order matters: GuiLoadStyleDefault() unloads the texture of a previously set
      * custom font, so reset the style first and set our font afterwards. */
     GuiLoadStyleDefault();
@@ -301,16 +315,61 @@ int main(int argc, char **argv)
     int applied_in = -1, applied_out = -1, applied_mon = -1, applied_mode = -1;
     int frame_no = 0;
     unsigned long long saved_hash = settings_hash(&s, &st, sel_in, sel_out, sel_mon, sel_mode);
-    double dirty_since = -1;
+    double dirty_since = -1, retry_at = 0;
+    int quit = 0, hidden = start_hidden, refresh_before_start = 0;
+    if (start_hidden) snprintf(note, sizeof note, "VoiceFilter działa w tle - ikona w zasobniku systemowym.");
 
-    while (!WindowShouldClose()) {
+    while (!quit) {
         const float dt = GetFrameTime();
+
+        /* ---- window close button: hide to tray in background mode, else quit ---- */
+        if (WindowShouldClose()) {
+            if (st.background && !shot) {
+                if (tray_ok) { SetWindowState(FLAG_WINDOW_HIDDEN); hidden = 1; }
+                else MinimizeWindow();
+                edit_in = edit_out = edit_preset = edit_name = 0;
+            } else quit = 1;
+        }
+
+        /* ---- tray icon menu ---- */
+        for (int ev; (ev = vf_tray_poll()) != VF_TRAY_NONE;) {
+            if (ev == VF_TRAY_SHOW) {
+                ClearWindowState(FLAG_WINDOW_HIDDEN);
+                if (IsWindowMinimized()) RestoreWindow();
+                SetWindowFocused();
+                hidden = 0;
+            } else if (ev == VF_TRAY_QUIT) quit = 1;
+            else if (ev == VF_TRAY_TOGGLE_BYPASS) atomic_store(&s.pipe.bypass_all, !atomic_load(&s.pipe.bypass_all));
+            else if (ev == VF_TRAY_TOGGLE_RUN) { want_running = !want_running; retry_at = 0; applied_in = -2; }
+        }
+        SetTargetFPS(hidden || IsWindowMinimized() ? 10 : 60);
 
         /* ---- (re)start the session when the wanted configuration changes ---- */
         if (init_ok) {
+            /* a device that vanished (unplugged, driver reset) stops the stream: restart it */
+            if (s.running && ma_device_get_state(&s.eng.dev) != ma_device_state_started) {
+                vf_session_stop(&s);
+                snprintf(status, sizeof status, "Urządzenie audio przestało działać - ponawiam uruchomienie...");
+                retry_at = GetTime() + 2.0;
+                refresh_before_start = 1;
+            }
             int cfg_changed = sel_in != applied_in || sel_out != applied_out || sel_mon != applied_mon ||
                               sel_mode != applied_mode;
-            if (want_running && (!s.running || cfg_changed)) {
+            if (want_running && (!s.running || cfg_changed) && GetTime() >= retry_at) {
+                if (refresh_before_start && !s.running) {
+                    /* device indices may have changed: re-enumerate and find ours by name */
+                    char n_in[256], n_out[256], n_mon[256];
+                    snprintf(n_in, sizeof n_in, "%s", sel_in < s.caps.count ? s.caps.dev[sel_in].name : "");
+                    snprintf(n_out, sizeof n_out, "%s", sel_out < s.plays.count ? s.plays.dev[sel_out].name : "");
+                    snprintf(n_mon, sizeof n_mon, "%s", sel_mon < s.plays.count ? s.plays.dev[sel_mon].name : "");
+                    if (vf_session_refresh_devices(&s) == 0) {
+                        if ((k = find_name(&s.caps, n_in)) >= 0) sel_in = k;
+                        if ((k = find_name(&s.plays, n_out)) >= 0) sel_out = k;
+                        if ((k = find_name(&s.plays, n_mon)) >= 0) sel_mon = k;
+                        build_list(list_in, sizeof list_in, &s.caps);
+                        build_list(list_out, sizeof list_out, &s.plays);
+                    }
+                }
                 VfSessionConfig c;
                 memset(&c, 0, sizeof c);
                 c.capture = file_buf ? -1 : sel_in;
@@ -319,14 +378,21 @@ int main(int argc, char **argv)
                 c.monitor = sel_mode == VF_OUT_VMIC_MONITOR ? sel_mon : -1;
                 c.file_src = file_buf;
                 c.file_len = file_len;
-                if (vf_session_start(&s, &c) == 0) status[0] = '\0';
-                else { snprintf(status, sizeof status, "%s", s.error); want_running = 0; }
+                if (vf_session_start(&s, &c) == 0) { status[0] = '\0'; refresh_before_start = 0; }
+                else {
+                    /* keep trying (e.g. a USB headset that appears a few seconds after login) */
+                    snprintf(status, sizeof status, "%s - ponowna próba za 3 s", s.error);
+                    retry_at = GetTime() + 3.0;
+                    refresh_before_start = 1;
+                }
                 applied_in = sel_in; applied_out = sel_out; applied_mon = sel_mon; applied_mode = sel_mode;
             } else if (!want_running && s.running) {
                 vf_session_stop(&s);
             }
+            if (!want_running && !s.running && retry_at > 0) { retry_at = 0; status[0] = '\0'; }
             drain_meters(&s, &m, dt);
         }
+        vf_tray_set_state(s.running, atomic_load(&s.pipe.bypass_all));
 
         /* ---- autosave settings.ini one second after the last change ---- */
         if (init_ok && have_settings_path) {
@@ -345,6 +411,12 @@ int main(int argc, char **argv)
                     dirty_since = -1;
                 }
             }
+        }
+
+        if (hidden) {                       /* in the tray: no UI work, just keep events flowing */
+            BeginDrawing();
+            EndDrawing();
+            continue;
         }
 
         BeginDrawing();
@@ -379,9 +451,9 @@ int main(int argc, char **argv)
 
         /* ---- presets + app options ---- */
         GuiLabel((Rectangle){ 16, 90, 80, 28 }, "Preset");
-        Rectangle r_preset = { 96, 90, 250, 28 };
-        if (GuiTextBox((Rectangle){ 360, 90, 190, 28 }, preset_name, sizeof preset_name - 1, edit_name)) edit_name = !edit_name;
-        if (GuiButton((Rectangle){ 556, 90, 120, 28 }, "Zapisz jako")) {
+        Rectangle r_preset = { 96, 90, 210, 28 };
+        if (GuiTextBox((Rectangle){ 316, 90, 160, 28 }, preset_name, sizeof preset_name - 1, edit_name)) edit_name = !edit_name;
+        if (GuiButton((Rectangle){ 482, 90, 110, 28 }, "Zapisz jako")) {
             char safe[64];
             if (vf_preset_sanitize(preset_name, safe, sizeof safe) != 0)
                 snprintf(note, sizeof note, "Wpisz nazwę presetu w polu obok.");
@@ -400,7 +472,7 @@ int main(int argc, char **argv)
         }
         const int user_preset = sel_preset < n_presets && !presets[sel_preset].builtin;
         if (!user_preset) GuiDisable();
-        if (GuiButton((Rectangle){ 682, 90, 80, 28 }, "Usuń") && user_preset) {
+        if (GuiButton((Rectangle){ 598, 90, 70, 28 }, "Usuń") && user_preset) {
             char gone[64];
             snprintf(gone, sizeof gone, "%s", presets[sel_preset].name);
             if (vf_preset_delete(gone) == 0) {
@@ -412,17 +484,29 @@ int main(int argc, char **argv)
         }
         GuiEnable();
         bool as = autostart_on != 0;
-        GuiCheckBox((Rectangle){ 790, 95, 18, 18 }, "Start z systemem", &as);
+        GuiCheckBox((Rectangle){ 684, 95, 18, 18 }, "Start z systemem", &as);
         if ((int)as != autostart_on) {
             if (vf_autostart_set(as) == 0) {
                 autostart_on = as;
-                snprintf(note, sizeof note, as ? "VoiceFilter uruchomi się z systemem (zminimalizowany)."
-                                               : "Autostart wyłączony.");
+                if (as) {
+                    /* starting with the system only makes sense if it then filters in the background */
+                    st.start_processing = 1;
+                    st.background = 1;
+                    snprintf(note, sizeof note, "Po zalogowaniu VoiceFilter wystartuje w tle i od razu zacznie filtrować.");
+                } else snprintf(note, sizeof note, "Autostart wyłączony.");
             } else snprintf(status, sizeof status, "Nie udało się zmienić autostartu.");
         }
         bool sp = st.start_processing != 0;
-        GuiCheckBox((Rectangle){ 960, 95, 18, 18 }, "Filtruj od razu po starcie", &sp);
+        GuiCheckBox((Rectangle){ 846, 95, 18, 18 }, "Filtruj po starcie", &sp);
         st.start_processing = sp;
+        bool bg = st.background != 0;
+        GuiCheckBox((Rectangle){ 1012, 95, 18, 18 }, "Działaj w tle", &bg);
+        if ((int)bg != st.background) {
+            st.background = bg;
+            snprintf(note, sizeof note, bg ? (tray_ok ? "Zamknięcie okna schowa VoiceFilter do zasobnika - filtr działa dalej."
+                                                      : "Zamknięcie okna zminimalizuje VoiceFilter - filtr działa dalej.")
+                                           : "Zamknięcie okna zakończy VoiceFilter.");
+        }
 
         /* ---- meters ---- */
         GuiGroupBox((Rectangle){ 16, TOP, 250, 586 }, "Poziomy");
@@ -560,6 +644,7 @@ int main(int argc, char **argv)
         st.bypass = atomic_load(&s.pipe.bypass_all);
         vf_settings_save(&st, &s.pipe, settings_file);
     }
+    vf_tray_stop();
     vf_session_free(&s);
     UnloadFont(font);
     CloseWindow();

@@ -35,6 +35,11 @@ Opcje CMake: `-DVF_GUI=OFF` (bez GUI), `-DVF_PIPEWIRE=OFF` (Linux bez wirtualneg
 - `build/voicefilter` — GUI: urządzenia, tryb wyjścia, suwaki efektów, wskaźniki, presety, autostart.
   Ustawienia zapisują się same (`%APPDATA%\VoiceFilter\settings.ini`, `~/.config/voicefilter/settings.ini`),
   presety użytkownika w podkatalogu `presets/`.
+- **Praca w tle:** zaznacz „Start z systemem” — po zalogowaniu VoiceFilter uruchomi się schowany w zasobniku
+  (ikona mikrofonu przy zegarze) i od razu zacznie filtrować. Z „Działaj w tle” zamknięcie okna (X) tylko je chowa;
+  filtr działa dalej, dopóki nie wybierzesz „Zakończ VoiceFilter” z menu ikony (prawy przycisk). Kliknięcie ikony
+  lub ponowne uruchomienie programu pokazuje okno. Po odłączeniu urządzenia program sam próbuje je ponownie otworzyć.
+  Na Linuksie nie ma ikony w zasobniku — okno zamiast tego się minimalizuje.
 - `build/voicefilter-cli` — wersja konsolowa (`--help`): `--vmic`, `--monitor N`, `--preset NAZWA`,
   klawisze `b` (bypass), `1..6` (efekty), `:` (komendy `show`, `set comp ratio 4`, `bypass gate`, `reset`).
 - Narzędzia testowe: `voicefilter-file` (przetwarzanie pliku), `vf-eval` (pomiary), `vf-latency`, `vf-record`

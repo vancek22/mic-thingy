@@ -134,6 +134,7 @@ int vf_settings_load(VfSettings *s, Pipeline *p, const char *path)
     s->mode = mode_from(vf_ini_get(&ini, "audio", "mode"), s->mode);
     s->bypass = vf_ini_get_int(&ini, "audio", "bypass", 0) != 0;
     s->start_processing = vf_ini_get_int(&ini, "app", "start_processing", s->start_processing) != 0;
+    s->background = vf_ini_get_int(&ini, "app", "background", s->background) != 0;
     const char *pr = vf_ini_get(&ini, "app", "preset");
     if (pr) copy(s->preset, sizeof s->preset, pr);
     if (p) {
@@ -152,9 +153,9 @@ int vf_settings_save(const VfSettings *s, const Pipeline *p, const char *path)
     if (!f) return -1;
     fprintf(f, "; VoiceFilter settings - written automatically, safe to edit while the app is closed\n"
                "[audio]\ninput = %s\noutput = %s\nmonitor = %s\nmode = %s\nbypass = %d\n"
-               "\n[app]\nstart_processing = %d\npreset = %s\n",
+               "\n[app]\nstart_processing = %d\nbackground = %d\npreset = %s\n",
             s->input, s->output, s->monitor, mode_name(s->mode), s->bypass,
-            s->start_processing, s->preset);
+            s->start_processing, s->background, s->preset);
     if (p) vf_fx_write_ini(f, p);
     if (fclose(f) != 0) { vf_remove(tmp); return -1; }
     return vf_replace_file(tmp, path);

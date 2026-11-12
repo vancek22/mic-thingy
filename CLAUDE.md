@@ -110,3 +110,16 @@ RNNoise has no upstream CMake: built by our own target using the portable (non-x
    command `"<exe>" --autostart --minimized`. Autostart test is opt-in: `VF_TEST_AUTOSTART=1` (uses a separate
    "VoiceFilter_selftest" entry and removes it).
    Paths are UTF-8 everywhere; on Windows `vf_fopen` / `vf_mkdir_p` convert to UTF-16.
+6. [done] Background mode (`src/app/tray.c`, GUI only). `[app] background = 1`: the window close button hides the
+   window to a tray icon (Windows: Shell_NotifyIcon on its own thread + hidden window class "VoiceFilterTrayWindow";
+   menu: Pokaż okno / Przetwarzanie dźwięku / Filtr włączony / Zakończ) - audio keeps running until "Zakończ".
+   No tray on Linux: close minimizes instead. Ticking "Start z systemem" also sets start_processing + background;
+   autostart launches `--autostart --minimized` -> starts hidden in the tray and filters immediately.
+   `FLAG_WINDOW_ALWAYS_RUN` is required (raylib otherwise blocks in glfwWaitEvents while minimized); FPS drops to 10
+   when hidden/minimized and no UI is drawn. Single instance: named mutex "Local\VoiceFilterSingleInstance"
+   (Linux: flock on <config>/voicefilter.lock); a second launch posts WM_APP+2 to the tray window -> first instance
+   shows its window, second exits 0. Robustness: if the stream stops (device unplugged) or start fails (USB headset
+   late after login), the GUI re-enumerates devices, finds them by name and retries every 2-3 s while running is wanted.
+   Live test (Windows): scratchpad-style script with VF_CONFIG_DIR, `--minimized --in-file`, vf-record on CABLE,
+   PostMessage WM_CLOSE to the GLFW window; note PowerShell turns $null into "" for P/Invoke strings -
+   use [NullString]::Value with FindWindowW.

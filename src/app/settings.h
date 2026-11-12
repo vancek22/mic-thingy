@@ -19,6 +19,7 @@ typedef struct VfSettings {
     int  mode;                 /* VfOutMode */
     int  bypass;
     int  start_processing;
+    int  background;           /* closing the window keeps VoiceFilter running (tray) */
     char preset[64];
 } VfSettings;
 
