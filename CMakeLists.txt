@@ -50,6 +50,14 @@ add_library(vfcore STATIC
   src/dsp/fx_compressor.c
   src/dsp/fx_eq3.c
   src/dsp/fx_limiter.c
+  src/dsp/fx_hum.c
+  src/dsp/fx_guard.c
+  src/dsp/fx_warmth.c
+  src/dsp/fx_deesser.c
+  src/dsp/fx_agc.c
+  src/dsp/fx_breath.c
+  src/dsp/fx_dereverb.c
+  src/dsp/fx_voice.c
   src/dsp/chain.c
   src/dsp/pipeline.c
   src/audio/engine.c
@@ -145,6 +153,12 @@ if(NOT MSVC)
   target_compile_options(test_dsp PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 add_test(NAME dsp COMMAND test_dsp)
+add_executable(test_fx tests/test_fx.c)
+target_link_libraries(test_fx PRIVATE vfcore)
+if(NOT MSVC)
+  target_compile_options(test_fx PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+add_test(NAME fx COMMAND test_fx)
 
 # ---------------------------------------------------------------- offline tools
 add_executable(mic-thingy-file tools/vf_file.c)

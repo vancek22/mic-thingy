@@ -4,7 +4,7 @@
 
 #include "dsp/fx.h"
 
-#define VF_MAX_FX 8
+#define VF_MAX_FX 16
 
 typedef struct Pipeline {
     Fx *fx[VF_MAX_FX];

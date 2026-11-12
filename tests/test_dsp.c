@@ -227,10 +227,11 @@ static void test_pipeline(void)
     }
 
     /* the audio thread picks up the new value on the next frame */
-    pipeline_set_param(&p, 3, COMP_MAKEUP_DB, 12.0f);
+    const int ci = pipeline_find_fx(&p, "comp");
+    pipeline_set_param(&p, ci, COMP_MAKEUP_DB, 12.0f);
     float b[VF_FRAME_SIZE] = { 0 };
     pipeline_process(&p, b);
-    CHECK(p.applied[3][COMP_MAKEUP_DB] == 12.0f, "param applied on audio thread");
+    CHECK(p.applied[ci][COMP_MAKEUP_DB] == 12.0f, "param applied on audio thread");
     pipeline_stop(&p);
 }
 
@@ -697,10 +698,10 @@ static void test_settings_presets(void)
     s.bypass = 1;
     snprintf(s.preset, sizeof s.preset, "podcast");
     snprintf(s.language, sizeof s.language, "pl");
-    pipeline_set_param(&p1, 2, GATE_THRESHOLD, 0.37f);
-    pipeline_set_param(&p1, 3, COMP_RATIO, 4.25f);
-    pipeline_set_param(&p1, 4, EQ_HIGH_DB, -3.5f);
-    pipeline_set_bypass(&p1, 4, 1);
+    pipeline_set_param(&p1, pipeline_find_fx(&p1, "gate"), GATE_THRESHOLD, 0.37f);
+    pipeline_set_param(&p1, pipeline_find_fx(&p1, "comp"), COMP_RATIO, 4.25f);
+    pipeline_set_param(&p1, pipeline_find_fx(&p1, "eq"), EQ_HIGH_DB, -3.5f);
+    pipeline_set_bypass(&p1, pipeline_find_fx(&p1, "eq"), 1);
     atomic_store(&p1.bypass_all, 1);
     char path[VF_PATH_MAX];
     CHECK(vf_settings_path(path, sizeof path) == 0, "settings path");
@@ -729,7 +730,7 @@ static void test_settings_presets(void)
     vf_ini_parse(&ini, "[fx.comp]\nratio = 999\nthreshold = abc\n[fx.nope]\nx=1\n");
     vf_fx_apply_ini(&p2, &ini);
     vf_ini_free(&ini);
-    CHECK(pipeline_get_param(&p2, 3, COMP_RATIO) == 20.0f, "out-of-range clamped");
+    CHECK(pipeline_get_param(&p2, pipeline_find_fx(&p2, "comp"), COMP_RATIO) == 20.0f, "out-of-range clamped");
 
     /* presets */
     VfPresetInfo list[VF_MAX_PRESETS];
@@ -752,9 +753,9 @@ static void test_settings_presets(void)
     for (int i = 0; i < n; i++)
         if (list[i].builtin) CHECK(vf_preset_apply(&p2, list[i].name) == 0, "built-in '%s' applies", list[i].name);
     vf_preset_apply(&p2, "Podcast");
-    CHECK(fabsf(pipeline_get_param(&p2, 3, COMP_MAKEUP_DB) - 5.0f) < 1e-6f, "Podcast sets comp makeup");
+    CHECK(fabsf(pipeline_get_param(&p2, pipeline_find_fx(&p2, "comp"), COMP_MAKEUP_DB) - 5.0f) < 1e-6f, "Podcast sets comp makeup");
     vf_preset_apply(&p2, "Domyślny");
-    CHECK(pipeline_get_param(&p2, 3, COMP_MAKEUP_DB) == 3.0f && !atomic_load(&p2.fx[4]->bypass), "Domyślny resets");
+    CHECK(pipeline_get_param(&p2, pipeline_find_fx(&p2, "comp"), COMP_MAKEUP_DB) == 3.0f && !atomic_load(&p2.fx[pipeline_find_fx(&p2, "eq")]->bypass), "Domyślny resets");
 
     CHECK(vf_preset_save(&p1, "Mój głos") == 0, "save user preset");
     CHECK(vf_preset_save(&p1, "Podcast") != 0, "built-in name refused");
@@ -763,7 +764,7 @@ static void test_settings_presets(void)
     for (int i = 0; i < n; i++) if (!strcmp(list[i].name, "Mój głos") && !list[i].builtin) found = 1;
     CHECK(found, "user preset listed");
     CHECK(vf_preset_apply(&p2, "Mój głos") == 0 &&
-          fabsf(pipeline_get_param(&p2, 3, COMP_RATIO) - 4.25f) < 1e-4f && atomic_load(&p2.fx[4]->bypass) == 1,
+          fabsf(pipeline_get_param(&p2, pipeline_find_fx(&p2, "comp"), COMP_RATIO) - 4.25f) < 1e-4f && atomic_load(&p2.fx[pipeline_find_fx(&p2, "eq")]->bypass) == 1,
           "user preset restores values");
     CHECK(vf_preset_delete("Mój głos") == 0 && vf_preset_apply(&p2, "Mój głos") != 0, "delete user preset");
     CHECK(vf_preset_delete("Podcast") != 0, "built-in cannot be deleted");

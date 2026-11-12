@@ -1,12 +1,13 @@
-/* The standard mic thingy chain:
- * highpass -> rnnoise -> gate -> comp -> eq -> limiter */
+/* The standard mic thingy chain (optional effects are off until enabled):
+ * highpass -> hum -> rnnoise -> dereverb -> gate -> breath -> guard -> agc -> comp -> deesser
+ *          -> eq -> warmth -> voice -> limiter */
 #ifndef VF_CHAIN_H
 #define VF_CHAIN_H
 
 #include "dsp/pipeline.h"
 
 typedef struct Chain {
-    Fx highpass, rnnoise, gate, comp, eq, limiter;
+    Fx highpass, hum, rnnoise, dereverb, gate, breath, guard, agc, comp, deesser, eq, warmth, voice, limiter;
 } Chain;
 
 /* Fills the Fx descriptors and adds them to the pipeline in order. 0 = ok. */

@@ -12,6 +12,8 @@ void biquad_highpass(Biquad *b, float sr, float freq, float q);
 void biquad_lowshelf(Biquad *b, float sr, float freq, float gain_db);
 void biquad_highshelf(Biquad *b, float sr, float freq, float gain_db);
 void biquad_peaking(Biquad *b, float sr, float freq, float q, float gain_db);
+void biquad_lowpass(Biquad *b, float sr, float freq, float q);
+void biquad_notch(Biquad *b, float sr, float freq, float q);
 
 static inline float biquad_tick(Biquad *b, float x)
 {

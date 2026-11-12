@@ -190,8 +190,8 @@ int main(int argc, char **argv)
     printf("  latency estimate: %s\n", lat);
     char rep[1024];
     if (lat_report) { engine_latency_report(&s.eng, rep, sizeof rep); printf("%s", rep); }
-    printf("Keys:  b = bypass all   1..%d = toggle effect   : = command   h = help   q = quit\n\n",
-           s.pipe.count);
+    printf("Keys:  b = bypass all   1..%d = toggle effect (the first nine; use : bypass NAME for the rest)   : = command   h = help   q = quit\n\n",
+           s.pipe.count > 9 ? 9 : s.pipe.count);
 
     Pipeline *pipe = &s.pipe;
     int running = 1, ticks = 0;
@@ -227,7 +227,7 @@ int main(int argc, char **argv)
                 editing = 1; cmd_len = 0;
                 printf("\n> ");
                 fflush(stdout);
-            } else if (k >= '1' && k <= '0' + pipe->count) {
+            } else if (k >= '1' && k <= '0' + (pipe->count > 9 ? 9 : pipe->count)) {
                 int fi = k - '1';
                 pipeline_set_bypass(pipe, fi, !atomic_load(&pipe->fx[fi]->bypass));
                 printf("\n%s: %s\n", pipe->fx[fi]->name,

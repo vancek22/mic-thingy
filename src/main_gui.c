@@ -437,7 +437,7 @@ static void window_close(void)
 
 int main(int argc, char **argv)
 {
-    int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0, demo = 0;
+    int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0, demo = 0, tab_arg = 0;
     const char *in_file = NULL, *shot = NULL, *lang_arg = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--autostart")) autostart = 1;
@@ -449,6 +449,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--verbose")) verbose = 1;
         else if (!strcmp(argv[i], "--minimized")) minimized = 1;
         else if (!strcmp(argv[i], "--demo")) demo = 1;
+        else if (!strcmp(argv[i], "--tab") && i + 1 < argc) tab_arg = atoi(argv[++i]);
     }
 
     /* One mic thingy at a time: a second launch (e.g. autostart + manual) would
@@ -500,6 +501,7 @@ int main(int argc, char **argv)
     int sel_mode = mode >= 0 && mode <= 2 ? mode : (st.mode >= 0 && st.mode <= 2 ? st.mode : VF_OUT_VMIC);
     int sel_lang = (int)vf_i18n_get();
     int edit_in = 0, edit_out = 0, edit_preset = 0, edit_name = 0;
+    int tab = tab_arg >= 0 && tab_arg <= 4 ? tab_arg : 0;     /* effect page: 0 basic, 1 extra, 2 effects (--tab N for screenshots) */
     static char list_in[LIST_CHARS], list_out[LIST_CHARS], list_presets[LIST_CHARS];
     g_demo = demo;
     build_list(list_in, sizeof list_in, &s.caps, "Microphone");
@@ -833,10 +835,14 @@ int main(int argc, char **argv)
         text(F.lcd, t, mx, y, vf_session_xruns(&s) ? C_AMBER : C_TEXT_DIM);
 
         /* ---- effect panels: 3 columns x 2 rows, built from the parameter tables ---- */
+        GuiToggleGroup((Rectangle){ 282, TOP, 120, 24 }, tr(S_TABS_FX), &tab);
+        int slot = 0;
         for (int i = 0; i < s.pipe.count; i++) {
             Fx *fx = s.pipe.fx[i];
-            const float pw = 292, ph = 290;
-            Rectangle box = { 282 + (i % 3) * (pw + 6), TOP + (i / 3) * (ph + 6), pw, ph };
+            if (fx->page != tab) continue;
+            const float pw = 292, ph = 276;
+            Rectangle box = { 282 + (slot % 3) * (pw + 6), TOP + 30 + (slot / 3) * (ph + 6), pw, ph };
+            slot++;
             bool on = !atomic_load(&fx->bypass);
             panel(box, tr_fx(fx->name), !on ? 0 : (s.running && !atomic_load(&s.pipe.bypass_all)) ? 1 : 2);
             GuiSetStyle(DEFAULT, TEXT_SIZE, 14);

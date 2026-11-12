@@ -39,6 +39,8 @@ struct Fx {
     int n_params;
     atomic_int latency;           /* algorithmic delay in samples (may change with params) */
     atomic_int bypass;                                                    /* 1 = skip */
+    int default_bypass;           /* 1 = off until the user enables it (new optional effects) */
+    int page;                     /* GUI tab: 0 basic, 1 extra, 2 effects */
 };
 
 #endif

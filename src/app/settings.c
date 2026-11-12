@@ -146,7 +146,7 @@ void vf_fx_apply_ini(Pipeline *p, const VfIni *ini)
 void vf_fx_reset(Pipeline *p)
 {
     for (int i = 0; i < p->count; i++) {
-        pipeline_set_bypass(p, i, 0);
+        pipeline_set_bypass(p, i, p->fx[i]->default_bypass);
         for (int j = 0; j < p->fx[i]->n_params; j++)
             pipeline_set_param(p, i, j, p->fx[i]->params[j].def);
     }

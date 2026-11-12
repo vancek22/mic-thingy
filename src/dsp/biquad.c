@@ -58,3 +58,15 @@ void biquad_peaking(Biquad *b, float sr, float freq, float q, float gain_db)
     double c = cos(w), al = sin(w) / (2.0 * q);
     set(b, 1 + al * A, -2 * c, 1 - al * A, 1 + al / A, -2 * c, 1 - al / A);
 }
+
+void biquad_lowpass(Biquad *b, float sr, float freq, float q)
+{
+    double w = 2.0 * VF_PI * freq / sr, c = cos(w), al = sin(w) / (2.0 * q);
+    set(b, (1 - c) / 2, 1 - c, (1 - c) / 2, 1 + al, -2 * c, 1 - al);
+}
+
+void biquad_notch(Biquad *b, float sr, float freq, float q)
+{
+    double w = 2.0 * VF_PI * freq / sr, c = cos(w), al = sin(w) / (2.0 * q);
+    set(b, 1.0, -2 * c, 1.0, 1 + al, -2 * c, 1 - al);
+}
