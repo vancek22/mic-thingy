@@ -78,6 +78,15 @@ RNNoise has no upstream CMake: built by our own target using the portable (non-x
    (`show`, `set <fx> <param> <value>`, `bypass`, `reset`), keys 1..6. Offline tests: `ctest --test-dir build` (`tests/test_dsp.c`).
    Params: UI writes `Pipeline.params[fx][id]` (atomic); audio thread applies changes once per frame. Effects declare
    their params in `Fx.params` (name/unit/min/max/default) - the GUI in stage 4 builds its sliders from that table.
-3. Virtual mic: Windows "CABLE Input" (VB-Cable), Linux `pw_stream` Audio/Source.
+3. [done on Windows; Linux written, untested here] Virtual mic. `voicefilter-cli --vmic [--monitor N]`
+   (or interactive mode menu). Windows: duplex mic -> chain -> "CABLE Input"; apps pick "CABLE Output".
+   Linux: capture-only engine -> tap -> `VfSink` -> `pw_stream` (`src/audio/vmic_pipewire.c`, media.class
+   Audio/Source/Virtual, node "voicefilter_mic", node.latency 480/48000); CMake option `VF_PIPEWIRE` (default ON on Linux).
+   Monitor = second playback device fed from a `VfSink`. `VfSink` (`src/audio/sink.c`) bridges two audio clocks:
+   lock-free ring, primes to `target` (960), drops/repeats one sample for drift, raises target after an underrun.
+   Guard: refuses CABLE Output / VoiceFilter source as input in vmic modes (feedback loop).
+   E2E test (Windows, plays into CABLE): `voicefilter-cli --in-file mix.wav --vmic --seconds 11` while
+   `vf-record --in "CABLE Output" --seconds 9 rec.wav`, then `vf-eval match offline.wav rec.wav`
+   (2026-11-12: r = 1.00000, gain 0.00 dB, residual -88.8 dB, 0 underruns).
 4. GUI (raylib + raygui).
 5. INI settings, presets, autostart.

@@ -26,7 +26,7 @@ int vf_devices_enumerate(ma_context *ctx, VfDeviceList *capture, VfDeviceList *p
     return 0;
 }
 
-static int contains_ci(const char *hay, const char *needle)
+int vf_contains_ci(const char *hay, const char *needle)
 {
     size_t nl = strlen(needle);
     if (nl == 0) return 1;
@@ -42,6 +42,6 @@ static int contains_ci(const char *hay, const char *needle)
 int vf_devices_find(const VfDeviceList *list, const char *needle)
 {
     for (int i = 0; i < list->count; i++)
-        if (contains_ci(list->dev[i].name, needle)) return i;
+        if (vf_contains_ci(list->dev[i].name, needle)) return i;
     return -1;
 }

@@ -266,15 +266,74 @@ static int cmd_noref(int argc, char **argv)
     return 0;
 }
 
+/* match REF REC: finds where REC (a live recording, e.g. of CABLE Output) sits
+ * inside REF (the offline-processed file, possibly looped) and how exactly it
+ * matches: coarse search on 10 ms energies, then sample-accurate refinement. */
+static int cmd_match(int argc, char **argv)
+{
+    if (argc < 4) return 2;
+    long nr, nx;
+    float *ref = load(argv[2], &nr), *rec = load(argv[3], &nx);
+    /* skip leading silence of the recording (device start-up) */
+    long s0 = 0;
+    while (s0 < nx && fabsf(rec[s0]) < 1e-4f) s0++;
+    s0 += SR / 2;                                 /* and let the stream settle */
+    long win = 3 * SR;
+    if (s0 + win > nx) { printf("recording too short or silent\n"); return 1; }
+
+    long nfr, nfx;
+    double *er = frame_energy(ref, nr, &nfr), *ex = frame_energy(rec + s0, win, &nfx);
+    long best_f = 0;
+    double bc = -1;
+    for (long f = 0; f + nfx <= nfr; f++) {
+        double c = 0, a = 0, b = 0;
+        for (long k = 0; k < nfx; k++) {
+            double x = sqrt(er[f + k]), y = sqrt(ex[k]);
+            c += x * y; a += x * x; b += y * y;
+        }
+        c /= sqrt(a * b + 1e-30);
+        if (c > bc) { bc = c; best_f = f; }
+    }
+    long best = 0;
+    double bsc = -2;
+    for (long off = best_f * FR - FR; off <= best_f * FR + FR; off++) {
+        if (off < 0 || off + win > nr) continue;
+        double c = 0, a = 0, b = 0;
+        for (long i = 0; i < win; i += 2) {
+            double x = ref[off + i], y = rec[s0 + i];
+            c += x * y; a += x * x; b += y * y;
+        }
+        c /= sqrt(a * b + 1e-30);
+        if (c > bsc) { bsc = c; best = off; }
+    }
+    double xy = 0, xx = 0, yy = 0;
+    for (long i = 0; i < win; i++) {
+        double x = ref[best + i], y = rec[s0 + i];
+        xy += x * y; xx += x * x; yy += y * y;
+    }
+    double g = xy / (xx + 1e-30), res = 0;
+    for (long i = 0; i < win; i++) {
+        double d = rec[s0 + i] - g * ref[best + i];
+        res += d * d;
+    }
+    printf("match: recording[%.3f s] = reference[%.3f s] | coarse r=%.3f, fine r=%.5f | gain %+.2f dB"
+           " | residual %.1f dB below signal\n",
+           (double)s0 / SR, (double)best / SR, bc, bsc, 20.0 * log10(fabs(g) + 1e-12),
+           db10(yy) - db10(res));
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     int rc = 2;
     if (argc >= 2 && !strcmp(argv[1], "mix"))   rc = cmd_mix(argc, argv);
     if (argc >= 2 && !strcmp(argv[1], "eval"))  rc = cmd_eval(argc, argv);
     if (argc >= 2 && !strcmp(argv[1], "noref")) rc = cmd_noref(argc, argv);
+    if (argc >= 2 && !strcmp(argv[1], "match")) rc = cmd_match(argc, argv);
     if (rc == 2)
         fprintf(stderr, "usage:\n  vf-eval mix CLEAN NOISE SNR_DB OUT\n"
                         "  vf-eval eval CLEAN MIX PROCESSED [NAME] [REF] [--list]\n"
-                        "  vf-eval noref INPUT PROCESSED [NAME]\n");
+                        "  vf-eval noref INPUT PROCESSED [NAME]\n"
+                        "  vf-eval match REFERENCE RECORDING\n");
     return rc;
 }

@@ -53,11 +53,28 @@ add_library(vfcore STATIC
   src/dsp/pipeline.c
   src/audio/engine.c
   src/audio/devices.c
+  src/audio/sink.c
+  src/audio/monitor.c
   src/util/cmdline.c
   src/util/console.c
+  src/util/ringbuf.c
   src/util/wavio.c)
 target_include_directories(vfcore PUBLIC src)
 target_link_libraries(vfcore PUBLIC rnnoise miniaudio)
+
+# Virtual microphone: PipeWire on Linux, stub elsewhere (Windows uses VB-Cable).
+option(VF_PIPEWIRE "Build the PipeWire virtual microphone (Linux)" ${UNIX})
+if(VF_PIPEWIRE AND UNIX AND NOT APPLE)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
+  target_sources(vfcore PRIVATE src/audio/vmic_pipewire.c)
+  target_link_libraries(vfcore PUBLIC PkgConfig::PIPEWIRE)
+  # SPA headers use GNU extensions that -Wpedantic flags.
+  set_source_files_properties(src/audio/vmic_pipewire.c PROPERTIES COMPILE_OPTIONS "-Wno-pedantic")
+  message(STATUS "VoiceFilter: PipeWire virtual microphone enabled")
+else()
+  target_sources(vfcore PRIVATE src/audio/vmic_stub.c)
+endif()
 if(MSVC)
   target_compile_options(vfcore PRIVATE /W4)
 else()
@@ -87,7 +104,9 @@ add_executable(vf-eval tools/vf_eval.c)
 target_link_libraries(vf-eval PRIVATE vfcore)
 add_executable(vf-latency tools/vf_latency.c)
 target_link_libraries(vf-latency PRIVATE vfcore)
-foreach(t voicefilter-file vf-eval vf-latency)
+add_executable(vf-record tools/vf_record.c)
+target_link_libraries(vf-record PRIVATE vfcore)
+foreach(t voicefilter-file vf-eval vf-latency vf-record)
   if(NOT MSVC)
     target_compile_options(${t} PRIVATE -Wall -Wextra -Wpedantic)
   endif()

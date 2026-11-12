@@ -7,7 +7,7 @@
 #define VF_HAVE_SSE 1
 #endif
 
-/* ---- audio thread: no malloc, no locks, no I/O below this line's callback ---- */
+/* ---- audio thread: no malloc, no locks, no I/O ---- */
 
 void engine_process_block(Engine *e, float *out, const float *in, unsigned frames)
 {
@@ -20,24 +20,29 @@ void engine_process_block(Engine *e, float *out, const float *in, unsigned frame
 
     /* First callback: pre-fill the output FIFO with the minimum silence that
      * keeps a constant block size B from ever starving: 480 - gcd(B, 480).
-     * (0 for B = 480 or 240-multiples of it, up to 479 otherwise.) If block sizes
-     * vary later, a starved callback outputs silence without consuming, which
-     * raises the buffer level permanently - a one-off glitch, then stable. */
+     * (0 for B = 480, up to 479 otherwise.) If block sizes vary later, a starved
+     * callback outputs silence without consuming, which raises the buffer level
+     * permanently - a one-off glitch, then stable. */
     if (!e->started) {
-        unsigned a = frames, b = VF_FRAME_SIZE;
-        while (b) { unsigned t = a % b; a = b; b = t; }
-        e->prime_samples = a ? VF_FRAME_SIZE - (int)a : 0;
+        if (out) {
+            unsigned a = frames, b = VF_FRAME_SIZE;
+            while (b) { unsigned t = a % b; a = b; b = t; }
+            e->prime_samples = a ? VF_FRAME_SIZE - (int)a : 0;
+        }
         e->out_head = 0;
         e->out_count = e->prime_samples;      /* out_fifo is zeroed at init */
         e->started = 1;
     }
 
-    /* 1) capture -> accumulator -> pipeline -> output FIFO */
+    /* 1) capture -> accumulator -> pipeline -> taps + output FIFO */
     for (unsigned i = 0; i < frames; i++) {
         e->in_acc[e->in_count++] = in[i];
         if (e->in_count == VF_FRAME_SIZE) {
             e->in_count = 0;
             pipeline_process(e->pipe, e->in_acc);
+            for (int t = 0; t < e->ntaps; t++)
+                vf_sink_write(e->taps[t], e->in_acc, VF_FRAME_SIZE);
+            if (!out) continue;
             if (e->out_count + VF_FRAME_SIZE <= VF_OUT_FIFO) {
                 int tail = e->out_head + e->out_count;
                 for (int k = 0; k < VF_FRAME_SIZE; k++)
@@ -50,6 +55,7 @@ void engine_process_block(Engine *e, float *out, const float *in, unsigned frame
     }
 
     /* 2) output FIFO -> playback */
+    if (!out) return;
     for (unsigned i = 0; i < frames; i++) {
         if (e->out_count > 0) {
             out[i] = e->out_fifo[e->out_head];
@@ -64,7 +70,24 @@ void engine_process_block(Engine *e, float *out, const float *in, unsigned frame
 
 static void data_callback(ma_device *dev, void *output, const void *input, ma_uint32 frames)
 {
-    engine_process_block((Engine *)dev->pUserData, (float *)output, (const float *)input, frames);
+    Engine *e = (Engine *)dev->pUserData;
+    if (!e->file_src) {
+        engine_process_block(e, (float *)output, (const float *)input, frames);
+        return;
+    }
+    /* file source: feed looped file samples in place of the microphone */
+    float *out = (float *)output;
+    ma_uint32 done = 0;
+    while (done < frames) {
+        ma_uint32 n = frames - done;
+        if (n > VF_SCRATCH) n = VF_SCRATCH;
+        for (ma_uint32 i = 0; i < n; i++) {
+            e->scratch[i] = e->file_src[e->file_pos];
+            if (++e->file_pos >= e->file_len) e->file_pos = 0;
+        }
+        engine_process_block(e, out ? out + done : NULL, e->scratch, n);
+        done += n;
+    }
 }
 
 /* ---- control thread ---- */
@@ -77,23 +100,24 @@ void engine_init_offline(Engine *e, Pipeline *pipe)
     atomic_init(&e->overruns, 0);
 }
 
-int engine_init(Engine *e, ma_context *ctx, Pipeline *pipe,
-                const ma_device_id *capture_id, const ma_device_id *playback_id, int period_frames)
+int engine_init(Engine *e, ma_context *ctx, Pipeline *pipe, const EngineConfig *c)
 {
-    memset(e, 0, sizeof *e);
-    e->pipe = pipe;
-    atomic_init(&e->underruns, 0);
-    atomic_init(&e->overruns, 0);
+    engine_init_offline(e, pipe);
+    e->file_src = c->file_src;
+    e->file_len = c->file_len;
+    if (c->file_src && (c->file_len <= 0 || c->no_playback)) return -1;
 
-    ma_device_config cfg = ma_device_config_init(ma_device_type_duplex);
+    ma_device_type type = c->file_src ? ma_device_type_playback
+                        : c->no_playback ? ma_device_type_capture : ma_device_type_duplex;
+    ma_device_config cfg = ma_device_config_init(type);
     cfg.sampleRate = VF_SAMPLE_RATE;
-    cfg.periodSizeInFrames = (ma_uint32)(period_frames > 0 ? period_frames : VF_DEFAULT_PERIOD);
+    cfg.periodSizeInFrames = (ma_uint32)(c->period_frames > 0 ? c->period_frames : VF_DEFAULT_PERIOD);
     cfg.periods = 2;
     cfg.performanceProfile = ma_performance_profile_low_latency;
-    cfg.capture.pDeviceID = capture_id;
+    cfg.capture.pDeviceID = c->capture_id;
     cfg.capture.format = ma_format_f32;
     cfg.capture.channels = 1;
-    cfg.playback.pDeviceID = playback_id;
+    cfg.playback.pDeviceID = c->playback_id;
     cfg.playback.format = ma_format_f32;
     cfg.playback.channels = 1;
     cfg.dataCallback = data_callback;
@@ -101,6 +125,13 @@ int engine_init(Engine *e, ma_context *ctx, Pipeline *pipe,
 
     if (ma_device_init(ctx, &cfg, &e->dev) != MA_SUCCESS) return -1;
     e->device_ready = 1;
+    return 0;
+}
+
+int engine_add_tap(Engine *e, VfSink *sink)
+{
+    if (e->ntaps >= VF_MAX_TAPS) return -1;
+    e->taps[e->ntaps++] = sink;
     return 0;
 }
 
@@ -122,12 +153,13 @@ void engine_uninit(Engine *e)
 void engine_latency(const Engine *e, EngineLatency *out)
 {
     const ma_device *d = &e->dev;
-    out->capture_rate  = d->capture.internalSampleRate;
-    out->playback_rate = d->playback.internalSampleRate;
-    out->capture_ms  = 1000.0 * d->capture.internalPeriodSizeInFrames *
-                       d->capture.internalPeriods / (double)d->capture.internalSampleRate;
-    out->playback_ms = 1000.0 * d->playback.internalPeriodSizeInFrames *
-                       d->playback.internalPeriods / (double)d->playback.internalSampleRate;
+    memset(out, 0, sizeof *out);
+    if (d->type == ma_device_type_capture || d->type == ma_device_type_duplex)
+        out->capture_ms = 1000.0 * d->capture.internalPeriodSizeInFrames *
+                          d->capture.internalPeriods / (double)d->capture.internalSampleRate;
+    if (d->type == ma_device_type_playback || d->type == ma_device_type_duplex)
+        out->playback_ms = 1000.0 * d->playback.internalPeriodSizeInFrames *
+                           d->playback.internalPeriods / (double)d->playback.internalSampleRate;
     out->fifo_ms = 1000.0 * e->prime_samples / VF_SAMPLE_RATE;
     out->dsp_ms = 1000.0 * pipeline_delay_samples(e->pipe) / VF_SAMPLE_RATE;
     out->total_ms = out->capture_ms + out->playback_ms + out->fifo_ms + out->dsp_ms;

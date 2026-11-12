@@ -22,4 +22,7 @@ int vf_devices_enumerate(ma_context *ctx, VfDeviceList *capture, VfDeviceList *p
 /* Index of the first device whose name contains `needle` (case-insensitive), or -1. */
 int vf_devices_find(const VfDeviceList *list, const char *needle);
 
+/* 1 if `needle` occurs in `hay`, ASCII case-insensitive. */
+int vf_contains_ci(const char *hay, const char *needle);
+
 #endif

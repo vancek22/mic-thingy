@@ -5,6 +5,8 @@
 #include <string.h>
 
 #include "audio/engine.h"
+#include "audio/sink.h"
+#include "util/ringbuf.h"
 #include "dsp/chain.h"
 #include "dsp/fx_rnnoise.h"
 #include "dsp/fx_compressor.h"
@@ -425,8 +427,121 @@ static void test_engine_blocks(void)
     }
 }
 
+static void test_ring(void)
+{
+    printf("ring buffer\n");
+    VfRing r;
+    CHECK(vf_ring_init(&r, 1000) == 0 && r.cap == 1024, "init/cap %u", r.cap);
+    float a[700], b[700];
+    for (int i = 0; i < 700; i++) a[i] = (float)i;
+    CHECK(vf_ring_write(&r, a, 700) == 700, "write 700");
+    CHECK(vf_ring_write(&r, a, 400) == 0, "write beyond capacity must fail atomically");
+    CHECK(vf_ring_read(&r, b, 500) == 500 && b[499] == 499.0f, "read 500");
+    CHECK(vf_ring_write(&r, a, 600) == 600, "wrap-around write");
+    CHECK(vf_ring_available(&r) == 800, "available %u", vf_ring_available(&r));
+    CHECK(vf_ring_read(&r, b, 700) == 700 && b[199] == 699.0f && b[200] == 0.0f && b[699] == 499.0f,
+          "wrap-around read order");
+    vf_ring_free(&r);
+}
+
+/* Two free-running clocks: producer pushes 480-sample frames at 48 kHz*(1+ppm),
+ * consumer pulls `block` samples at 48 kHz. Output must stay continuous (a ramp)
+ * apart from single-sample drift fixes, with no underruns after start-up. */
+static void sink_sim(double ppm, int block, double seconds)
+{
+    VfSink s;
+    vf_sink_init(&s, 960);
+    const long ticks = (long)(seconds * SR);
+    double acc = 0;
+    float frame[VF_FRAME_SIZE], out[2048];
+    float next = 1.0f, last = 0.0f;
+    long prod_count = 0, jumps = 0, bad = 0, started = 0;
+    int maxlevel = 0;
+    for (long t = 0; t < ticks; t++) {
+        acc += 1.0 + ppm * 1e-6;
+        if (acc >= VF_FRAME_SIZE) {
+            acc -= VF_FRAME_SIZE;
+            for (int i = 0; i < VF_FRAME_SIZE; i++) frame[i] = (float)(prod_count++ % 1000000 + 1);
+            vf_sink_write(&s, frame, VF_FRAME_SIZE);
+        }
+        if (t % block == block - 1) {
+            vf_sink_read(&s, out, block);
+            int lv = atomic_load(&s.level);
+            if (lv > maxlevel) maxlevel = lv;
+            for (int i = 0; i < block; i++) {
+                if (out[i] == 0.0f) { if (started) bad++; continue; }
+                if (started) {
+                    float d = out[i] - last;
+                    if (d == 0.0f || d == 2.0f) jumps++;           /* repeat / drop */
+                    else if (d != 1.0f && !(last == 1000000.0f && out[i] == 1.0f)) bad++;
+                }
+                started = 1;
+                last = out[i];
+            }
+        }
+    }
+    (void)next;
+    unsigned ur = atomic_load(&s.underruns), orn = atomic_load(&s.overruns);
+    printf("  %+5.0f ppm, block %4d: drift fixes %ld, discontinuities %ld, underruns %u, overruns %u, max level %d\n",
+           ppm, block, jumps, bad, ur, orn, maxlevel);
+    CHECK(bad == 0 && ur == 0 && orn == 0, "sink %+.0f ppm block %d failed", ppm, block);
+    CHECK(maxlevel < 960 + 480 + 2 * block + VF_FRAME_SIZE, "level grew to %d", maxlevel);
+    /* drift must be absorbed: corrections ~ |ppm| * seconds * 48, plus trimming the
+     * start-up cushion (primed at target + block, jitter up to one producer frame) */
+    CHECK(jumps <= (long)(fabs(ppm) * 1e-6 * seconds * SR) + block + VF_FRAME_SIZE + 960,
+          "too many drift fixes %ld", jumps);
+    vf_sink_free(&s);
+}
+
+static void test_sink(void)
+{
+    printf("sink (clock drift)\n");
+    sink_sim(0, 256, 30);
+    sink_sim(500, 256, 60);
+    sink_sim(-500, 256, 60);
+    sink_sim(300, 1024, 60);     /* PipeWire default quantum */
+    sink_sim(-300, 480, 60);
+    sink_sim(200, 128, 30);
+}
+
+/* Capture-only engine (Linux virtual mic): out == NULL, frames go to the tap. */
+static void test_engine_taps(void)
+{
+    printf("engine taps (capture-only)\n");
+    static Chain c;
+    static Pipeline p;
+    static Engine e;
+    static float in[SR], out[SR];
+    speechish(in, SR);
+    pipeline_init(&p); chain_build(&c, &p); pipeline_start(&p, SR);
+    engine_init_offline(&e, &p);
+    VfSink s;
+    vf_sink_init(&s, 0);
+    engine_add_tap(&e, &s);
+    long pos = 0;
+    unsigned avail = 0;
+    while (pos < SR) {
+        unsigned b = pos % 3 ? 441 : 333;
+        if (pos + (long)b > SR) b = (unsigned)(SR - pos);
+        engine_process_block(&e, NULL, in + pos, b);
+        pos += b;
+        avail += vf_ring_read(&s.ring, out + avail, SR - avail);   /* consumer keeps up */
+    }
+    CHECK(avail == (SR / VF_FRAME_SIZE) * VF_FRAME_SIZE, "tap got %u samples", avail);
+    CHECK(atomic_load(&s.overruns) == 0, "tap overruns %u", atomic_load(&s.overruns));
+    int nz = 0;
+    for (unsigned i = 0; i < avail; i++) if (out[i] != 0.0f) nz++;
+    CHECK(nz > (int)avail / 2, "tap output mostly silent (%d non-zero)", nz);
+    CHECK(atomic_load(&e.underruns) == 0, "capture-only must not count underruns");
+    vf_sink_free(&s);
+    pipeline_stop(&p);
+}
+
 int main(void)
 {
+    test_ring();
+    test_sink();
+    test_engine_taps();
     test_rnnoise_delay();
     test_chain_delay();
     test_engine_blocks();
