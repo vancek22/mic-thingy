@@ -6,6 +6,7 @@
  * The audio runs on miniaudio's thread; this thread only writes parameters
  * (atomics via pipeline_set_param) and drains the meter ring buffer. */
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,9 +15,21 @@
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
 
+#include "app/abtest.h"
+#include "app/appwatch.h"
+#include "app/automute.h"
+#include "app/calibrate.h"
+#include "app/hotkeys.h"
 #include "app/i18n.h"
 #include "app/icon_art.h"
+#include "app/overlay.h"
+#include "app/recorder.h"
 #include "app/session.h"
+#include "app/soundboard.h"
+#include "app/stats.h"
+#include "app/theme.h"
+#include "app/undo.h"
+#include "dsp/spectrum.h"
 #include "app/win_chrome.h"
 #include "app/settings.h"
 #include "app/tray.h"
@@ -38,26 +51,41 @@
  *   accent   - neon green: LEDs, values, meters, anything switched ON
  *   contrast - burgundy (hue ~345 deg): anything switched OFF, errors
  * Amber stays only as the meter warning colour. */
-#define C_BG_TOP     (Color){ 30, 34, 43, 255 }
-#define C_BG_BOTTOM  (Color){ 13, 15, 20, 255 }
-#define C_PANEL      (Color){ 22, 26, 33, 255 }
-#define C_BEVEL_HI   (Color){ 72, 81, 99, 255 }
-#define C_BEVEL_LO   (Color){ 4, 5, 7, 255 }
-#define C_EDGE       (Color){ 41, 48, 61, 255 }
-#define C_SLATE_A    (Color){ 50, 62, 92, 255 }     /* title strip gradient */
-#define C_SLATE_B    (Color){ 24, 29, 42, 255 }
-#define C_NEON       (Color){ 57, 255, 20, 255 }
-#define C_GREEN_BTN  (Color){ 40, 150, 32, 255 }
-#define C_BURGUNDY   (Color){ 128, 22, 52, 255 }
-#define C_BURG_HI    (Color){ 196, 60, 96, 255 }
-#define C_BURG_TEXT  (Color){ 255, 214, 224, 255 }
-#define C_TEXT       (Color){ 205, 213, 225, 255 }  /* cool off-white */
-#define C_TEXT_DIM   (Color){ 120, 131, 151, 255 }
-#define C_TITLE      (Color){ 236, 241, 248, 255 }
-#define C_LCD_BG     (Color){ 9, 11, 15, 255 }
-#define C_SEG_OFF    (Color){ 30, 36, 46, 255 }
-#define C_AMBER      (Color){ 255, 190, 50, 255 }
-#define C_RED        (Color){ 255, 84, 110, 255 }
+/* Colours come from the active theme (app/theme.c): g_c[] is filled by apply_theme().
+ * Split-complementary idea of the default theme: cool neutrals, ONE accent (ON), burgundy (OFF),
+ * amber only as the meter warning. Derived shades are computed with mixc() so every theme works. */
+static Color g_c[TC_COUNT];
+#define C_BG_TOP     g_c[TC_BG_TOP]
+#define C_BG_BOTTOM  g_c[TC_BG_BOTTOM]
+#define C_PANEL      g_c[TC_PANEL]
+#define C_BEVEL_HI   g_c[TC_BEVEL_HI]
+#define C_BEVEL_LO   g_c[TC_BEVEL_LO]
+#define C_EDGE       g_c[TC_EDGE]
+#define C_SLATE_A    g_c[TC_SLATE_A]
+#define C_SLATE_B    g_c[TC_SLATE_B]
+#define C_NEON       g_c[TC_ACCENT]
+#define C_GREEN_BTN  g_c[TC_ON_BTN]
+#define C_BURGUNDY   g_c[TC_OFF]
+#define C_BURG_HI    g_c[TC_OFF_HI]
+#define C_BURG_TEXT  g_c[TC_OFF_TEXT]
+#define C_TEXT       g_c[TC_TEXT]
+#define C_TEXT_DIM   g_c[TC_TEXT_DIM]
+#define C_TITLE      g_c[TC_TITLE]
+#define C_LCD_BG     g_c[TC_LCD_BG]
+#define C_SEG_OFF    g_c[TC_SEG_OFF]
+#define C_AMBER      g_c[TC_WARN]
+#define C_RED        g_c[TC_ERROR]
+
+static Color mixc(Color a, Color b, float t)
+{
+    return (Color){ (unsigned char)(a.r + (b.r - a.r) * t), (unsigned char)(a.g + (b.g - a.g) * t),
+                    (unsigned char)(a.b + (b.b - a.b) * t), 255 };
+}
+#define C_DISABLED   mixc(C_TEXT_DIM, C_PANEL, 0.55f)
+
+/* text drawn on a dark strip (header, status bar): light themes would otherwise get dark-on-dark */
+static int lumac(Color c) { return (299 * c.r + 587 * c.g + 114 * c.b) / 1000; }
+static Color on_dark(Color c) { return lumac(c) > 110 ? c : C_TITLE; }
 
 typedef struct { Font ui, bold, title, lcd, lcd_big; } Fonts;
 static Fonts F;
@@ -104,6 +132,15 @@ static void unload_fonts(void)
 
 static int hexc(Color c) { return ColorToInt(c); }
 
+static Color header_top(void) { return mixc(C_SLATE_A, C_BEVEL_HI, 0.25f); }
+
+static void apply_theme(int index)
+{
+    const VfTheme *th = vf_theme_get(index);
+    for (int i = 0; i < TC_COUNT; i++) g_c[i] = (Color){ th->c[i].r, th->c[i].g, th->c[i].b, th->c[i].a };
+}
+
+
 static void apply_style(void)
 {
     /* Order matters: GuiLoadStyleDefault() unloads the texture of a previously set
@@ -113,29 +150,29 @@ static void apply_style(void)
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
     GuiSetStyle(DEFAULT, TEXT_SPACING, 0);
     GuiSetStyle(DEFAULT, BORDER_WIDTH, 1);
-    GuiSetStyle(DEFAULT, BORDER_COLOR_NORMAL, hexc((Color){ 66, 76, 95, 255 }));
-    GuiSetStyle(DEFAULT, BASE_COLOR_NORMAL, hexc((Color){ 32, 38, 48, 255 }));
+    GuiSetStyle(DEFAULT, BORDER_COLOR_NORMAL, hexc(mixc(C_PANEL, C_BEVEL_HI, 0.85f)));
+    GuiSetStyle(DEFAULT, BASE_COLOR_NORMAL, hexc(mixc(C_PANEL, C_BEVEL_HI, 0.2f)));
     GuiSetStyle(DEFAULT, TEXT_COLOR_NORMAL, hexc(C_TEXT));
-    GuiSetStyle(DEFAULT, BORDER_COLOR_FOCUSED, hexc((Color){ 110, 220, 90, 255 }));
-    GuiSetStyle(DEFAULT, BASE_COLOR_FOCUSED, hexc((Color){ 42, 50, 64, 255 }));
+    GuiSetStyle(DEFAULT, BORDER_COLOR_FOCUSED, hexc(mixc(C_NEON, C_TEXT, 0.3f)));
+    GuiSetStyle(DEFAULT, BASE_COLOR_FOCUSED, hexc(mixc(C_PANEL, C_BEVEL_HI, 0.4f)));
     GuiSetStyle(DEFAULT, TEXT_COLOR_FOCUSED, hexc(C_TITLE));
-    GuiSetStyle(DEFAULT, BORDER_COLOR_PRESSED, hexc((Color){ 150, 255, 120, 255 }));
+    GuiSetStyle(DEFAULT, BORDER_COLOR_PRESSED, hexc(mixc(C_NEON, C_TITLE, 0.4f)));
     GuiSetStyle(DEFAULT, BASE_COLOR_PRESSED, hexc(C_GREEN_BTN));
-    GuiSetStyle(DEFAULT, TEXT_COLOR_PRESSED, hexc((Color){ 240, 255, 236, 255 }));
-    GuiSetStyle(DEFAULT, BORDER_COLOR_DISABLED, hexc((Color){ 40, 45, 55, 255 }));
-    GuiSetStyle(DEFAULT, BASE_COLOR_DISABLED, hexc((Color){ 24, 27, 34, 255 }));
-    GuiSetStyle(DEFAULT, TEXT_COLOR_DISABLED, hexc((Color){ 70, 77, 92, 255 }));
-    GuiSetStyle(DEFAULT, LINE_COLOR, hexc((Color){ 66, 76, 95, 255 }));
+    GuiSetStyle(DEFAULT, TEXT_COLOR_PRESSED, hexc(C_TITLE));
+    GuiSetStyle(DEFAULT, BORDER_COLOR_DISABLED, hexc(mixc(C_PANEL, C_BEVEL_HI, 0.3f)));
+    GuiSetStyle(DEFAULT, BASE_COLOR_DISABLED, hexc(mixc(C_PANEL, C_BG_TOP, 0.4f)));
+    GuiSetStyle(DEFAULT, TEXT_COLOR_DISABLED, hexc(C_DISABLED));
+    GuiSetStyle(DEFAULT, LINE_COLOR, hexc(mixc(C_PANEL, C_BEVEL_HI, 0.85f)));
     GuiSetStyle(DEFAULT, BACKGROUND_COLOR, hexc(C_PANEL));
     GuiSetStyle(SLIDER, BORDER_WIDTH, 1);
     GuiSetStyle(SLIDER, SLIDER_PADDING, 1);
     GuiSetStyle(SLIDER, BASE_COLOR_NORMAL, hexc(C_LCD_BG));
-    GuiSetStyle(SLIDER, BASE_COLOR_PRESSED, hexc((Color){ 52, 200, 34, 255 }));   /* slider fill = accent */
-    GuiSetStyle(SLIDER, BASE_COLOR_FOCUSED, hexc((Color){ 52, 200, 34, 255 }));
-    GuiSetStyle(SLIDER, TEXT_COLOR_FOCUSED, hexc((Color){ 110, 255, 80, 255 }));   /* bar while hovered */
+    GuiSetStyle(SLIDER, BASE_COLOR_PRESSED, hexc(mixc(C_NEON, C_LCD_BG, 0.25f)));   /* slider fill = accent */
+    GuiSetStyle(SLIDER, BASE_COLOR_FOCUSED, hexc(mixc(C_NEON, C_LCD_BG, 0.25f)));
+    GuiSetStyle(SLIDER, TEXT_COLOR_FOCUSED, hexc(mixc(C_NEON, C_TITLE, 0.25f)));   /* bar while hovered */
     GuiSetStyle(SLIDER, TEXT_COLOR_PRESSED, hexc(C_NEON));                          /* bar while dragged */
     GuiSetStyle(CHECKBOX, BASE_COLOR_PRESSED, hexc(C_NEON));                       /* check mark */
-    GuiSetStyle(CHECKBOX, BORDER_COLOR_NORMAL, hexc((Color){ 90, 102, 124, 255 }));
+    GuiSetStyle(CHECKBOX, BORDER_COLOR_NORMAL, hexc(mixc(C_PANEL, C_TEXT_DIM, 0.8f)));
     GuiSetStyle(TEXTBOX, BASE_COLOR_PRESSED, hexc(C_LCD_BG));
     GuiSetStyle(TEXTBOX, TEXT_COLOR_PRESSED, hexc(C_NEON));
     GuiSetStyle(TEXTBOX, BORDER_COLOR_PRESSED, hexc(C_NEON));
@@ -176,13 +213,13 @@ static void panel(Rectangle r, const char *title, int led)
     bevel(r, 1);
     Rectangle t = { r.x + 4, r.y + 4, r.width - 8, 24 };
     DrawRectangleGradientH((int)t.x, (int)t.y, (int)t.width, (int)t.height, C_SLATE_A, C_SLATE_B);
-    DrawLine((int)t.x, (int)t.y, (int)(t.x + t.width), (int)t.y, (Color){ 140, 160, 200, 110 });
-    DrawLine((int)t.x, (int)(t.y + t.height), (int)(t.x + t.width), (int)(t.y + t.height), (Color){ 57, 255, 20, 70 });
+    DrawLine((int)t.x, (int)t.y, (int)(t.x + t.width), (int)t.y, Fade(C_TITLE, 0.43f));
+    DrawLine((int)t.x, (int)(t.y + t.height), (int)(t.x + t.width), (int)(t.y + t.height), Fade(C_NEON, 0.27f));
     float x = t.x + 8;
     if (led >= 0) {
-        Color c = led == 1 ? C_NEON : led == 2 ? (Color){ 30, 110, 22, 255 } : C_BURG_HI;
+        Color c = led == 1 ? C_NEON : led == 2 ? mixc(C_NEON, C_LCD_BG, 0.62f) : C_BURG_HI;
         DrawCircle((int)x + 4, (int)(t.y + 12), 4.5f, c);
-        if (led == 1) DrawCircle((int)x + 4, (int)(t.y + 12), 8, (Color){ 57, 255, 20, 40 });
+        if (led == 1) DrawCircle((int)x + 4, (int)(t.y + 12), 8, Fade(C_NEON, 0.16f));
         x += 16;
     }
     text(F.bold, title, x, t.y + 5, C_TITLE);
@@ -197,17 +234,17 @@ static bool onoff(Rectangle r, bool on, const char *label_on, const char *label_
     for (int i = 0; i < 6; i++) saved[i] = GuiGetStyle(TOGGLE, props[i]);
     if (on) {
         GuiSetStyle(TOGGLE, BASE_COLOR_NORMAL, hexc(C_GREEN_BTN));
-        GuiSetStyle(TOGGLE, BORDER_COLOR_NORMAL, hexc((Color){ 110, 230, 90, 255 }));
-        GuiSetStyle(TOGGLE, TEXT_COLOR_NORMAL, hexc((Color){ 240, 255, 236, 255 }));
-        GuiSetStyle(TOGGLE, BASE_COLOR_FOCUSED, hexc((Color){ 52, 178, 42, 255 }));
-        GuiSetStyle(TOGGLE, BORDER_COLOR_FOCUSED, hexc((Color){ 170, 255, 150, 255 }));
+        GuiSetStyle(TOGGLE, BORDER_COLOR_NORMAL, hexc(mixc(C_NEON, C_TEXT, 0.25f)));
+        GuiSetStyle(TOGGLE, TEXT_COLOR_NORMAL, hexc(C_TITLE));
+        GuiSetStyle(TOGGLE, BASE_COLOR_FOCUSED, hexc(mixc(C_GREEN_BTN, C_NEON, 0.35f)));
+        GuiSetStyle(TOGGLE, BORDER_COLOR_FOCUSED, hexc(mixc(C_NEON, C_TITLE, 0.5f)));
         GuiSetStyle(TOGGLE, TEXT_COLOR_FOCUSED, hexc((Color){ 255, 255, 255, 255 }));
     } else {
         GuiSetStyle(TOGGLE, BASE_COLOR_NORMAL, hexc(C_BURGUNDY));
         GuiSetStyle(TOGGLE, BORDER_COLOR_NORMAL, hexc(C_BURG_HI));
         GuiSetStyle(TOGGLE, TEXT_COLOR_NORMAL, hexc(C_BURG_TEXT));
-        GuiSetStyle(TOGGLE, BASE_COLOR_FOCUSED, hexc((Color){ 156, 34, 68, 255 }));
-        GuiSetStyle(TOGGLE, BORDER_COLOR_FOCUSED, hexc((Color){ 236, 110, 140, 255 }));
+        GuiSetStyle(TOGGLE, BASE_COLOR_FOCUSED, hexc(mixc(C_BURGUNDY, C_BURG_HI, 0.3f)));
+        GuiSetStyle(TOGGLE, BORDER_COLOR_FOCUSED, hexc(mixc(C_BURG_HI, C_BURG_TEXT, 0.4f)));
         GuiSetStyle(TOGGLE, TEXT_COLOR_FOCUSED, hexc((Color){ 255, 255, 255, 255 }));
     }
     /* draw as a non-active toggle so our "normal" colours are used in both states */
@@ -263,14 +300,14 @@ static void background(void)
 {
     DrawRectangleGradientV(0, 0, WIN_W, WIN_H, C_BG_TOP, C_BG_BOTTOM);
     for (int x = 0; x < WIN_W; x += 24)                          /* faint blueprint grid */
-        DrawLine(x, HEADER_H, x, WIN_H, (Color){ 140, 160, 210, 7 });
+        DrawLine(x, HEADER_H, x, WIN_H, Fade(C_TEXT, 0.03f));
     for (int y = HEADER_H; y < WIN_H; y += 24)
-        DrawLine(0, y, WIN_W, y, (Color){ 140, 160, 210, 7 });
+        DrawLine(0, y, WIN_W, y, Fade(C_TEXT, 0.03f));
     /* header: brushed slate "chrome" strip with a neon underline */
-    DrawRectangleGradientV(0, 0, WIN_W, HEADER_H, (Color){ 58, 68, 92, 255 }, (Color){ 20, 24, 33, 255 });
-    DrawLine(0, 1, WIN_W, 1, (Color){ 170, 185, 220, 90 });
+    DrawRectangleGradientV(0, 0, WIN_W, HEADER_H, header_top(), C_SLATE_B);
+    DrawLine(0, 1, WIN_W, 1, Fade(C_TITLE, 0.35f));
     DrawRectangle(0, HEADER_H - 2, WIN_W, 2, C_NEON);
-    DrawRectangle(0, HEADER_H, WIN_W, 5, (Color){ 57, 255, 20, 22 });
+    DrawRectangle(0, HEADER_H, WIN_W, 5, Fade(C_NEON, 0.09f));
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -306,6 +343,8 @@ typedef struct {
     float vad, gate, gr, rms_out;
 } Meters;
 
+static void ui_frame(const float *f);          /* gui_tools.inc: statistics, calibration */
+
 static void drain_meters(VfSession *s, Meters *m, float dt)
 {
     float buf[VF_METER_FIELDS * 32];
@@ -320,6 +359,7 @@ static void drain_meters(VfSession *s, Meters *m, float dt)
             if (f[VF_M_PEAK_OUT] > pout) pout = f[VF_M_PEAK_OUT];
             if (f[VF_M_RMS_OUT] > rms) rms = f[VF_M_RMS_OUT];
             if (f[VF_M_GR] < gr) gr = f[VF_M_GR];
+            ui_frame(f);
             vad = f[VF_M_VAD];
             gate = f[VF_M_GATE];
             frames++;
@@ -360,6 +400,17 @@ static unsigned long long settings_hash(const VfSession *s, const VfSettings *st
     MIX(atomic_load(&((VfSession *)s)->pipe.bypass_all));
     for (const char *p = st->preset; *p; p++) MIX(*p);
     for (const char *p = st->language; *p; p++) MIX(*p);
+    for (const char *p = st->theme; *p; p++) MIX(*p);
+    MIX(st->compact); MIX(st->overlay); MIX(st->overlay_corner); MIX(st->per_mic); MIX(st->auto_mute_lock);
+    MIX(st->auto_mute_idle_min); MIX(st->ptt_enabled); MIX(st->apps_enabled); MIX(st->sys_enabled); MIX(st->monitor_raw);
+    MIX((long long)(st->monitor_gain_db * 10)); MIX((long long)(st->board_gain_db * 10));
+    MIX((long long)(st->sys_gain_db * 10)); MIX((long long)(st->sys_duck_db * 10));
+    for (const char *p = st->sys_device; *p; p++) MIX(*p);
+    for (const char *p = st->hk_mute; *p; p++) MIX(*p);
+    for (const char *p = st->hk_ptt; *p; p++) MIX(*p);
+    for (const char *p = st->hk_bypass; *p; p++) MIX(*p);
+    for (int i = 0; i < 8; i++) { for (const char *p = st->hk_board[i]; *p; p++) MIX(*p); for (const char *p = st->board_path[i]; *p; p++) MIX(*p); }
+    for (int i = 0; i < st->n_apps; i++) { for (const char *p = st->apps[i].exe; *p; p++) MIX(*p); for (const char *p = st->apps[i].preset; *p; p++) MIX(*p); }
     for (int i = 0; i < s->pipe.count; i++) {
         MIX(atomic_load(&s->pipe.fx[i]->bypass));
         for (int j = 0; j < s->pipe.fx[i]->n_params; j++) {
@@ -396,7 +447,30 @@ static void fill_device_names(VfSettings *st, const VfSession *s, int in, int ou
 
 /* ---- window lifetime: in the tray the window AND its OpenGL context are destroyed (the driver
  * alone maps ~80 MB); showing the window creates them again. All app state lives in main(). ---- */
+static unsigned rgbi(Color c) { return ((unsigned)c.r << 16) | ((unsigned)c.g << 8) | c.b; }
+
+static void style_titlebar(void)
+{
+    vf_window_style_titlebar(GetWindowHandle(), rgbi(header_top()), rgbi(C_TITLE), rgbi(C_SLATE_B));
+}
+
+/* Switches the colours of the running GUI (fonts and window stay). */
+static void retheme(int index)
+{
+    apply_theme(index);
+    GuiSetFont(GetFontDefault());          /* raygui frees its current font in GuiLoadStyleDefault() */
+    apply_style();
+    style_titlebar();
+}
+
 static int g_win_open;
+static VfSettings *g_st;                       /* settings, shared with gui_tools.inc */
+
+static int window_pos_ok(int x, int y)
+{
+    const int mon = GetCurrentMonitor();
+    return x > -200 && y > -20 && x < GetMonitorWidth(mon) - 100 && y < GetMonitorHeight(mon) - 100;
+}
 static Texture2D logo_tex;
 
 static void window_open(int minimized)
@@ -412,7 +486,7 @@ static void window_open(int minimized)
     static unsigned char px[64 * 64 * 4];
     vf_icon_render(px, 64, 1);
     SetWindowIcon((Image){ px, 64, 64, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 });
-    vf_window_style_titlebar(GetWindowHandle(), 0x3A445C, 0xDCE6F5, 0x2A3140);
+    style_titlebar();
     /* header logo rendered at its display size (36 px) so it gets the icon-size variant */
     static unsigned char logo_px[36 * 36 * 4];
     vf_icon_render(logo_px, 36, 1);
@@ -420,11 +494,19 @@ static void window_open(int minimized)
     load_fonts();
     apply_style();
     g_win_open = 1;
+    if (g_st) {
+        const Vector2 wp = { (float)(g_st->compact ? g_st->cwin_x : g_st->win_x), (float)(g_st->compact ? g_st->cwin_y : g_st->win_y) };
+        if (wp.x != -32000 && window_pos_ok((int)wp.x, (int)wp.y)) SetWindowPosition((int)wp.x, (int)wp.y);
+        if (g_st->compact) { SetWindowSize(300, 150); SetWindowState(FLAG_WINDOW_TOPMOST); }
+    }
 }
+
+static void remember_window_pos(void);
 
 static void window_close(void)
 {
     if (!g_win_open) return;
+    remember_window_pos();
     /* raygui keeps a pointer to the active font and frees it in the next GuiLoadStyleDefault():
      * point it back to the built-in font first, or reopening the window frees our fonts twice. */
     GuiSetFont(GetFontDefault());
@@ -434,6 +516,8 @@ static void window_close(void)
     g_win_open = 0;
     vf_trim_memory();                              /* hand the freed pages back to the OS */
 }
+
+#include "gui_tools.inc"
 
 int main(int argc, char **argv)
 {
@@ -461,12 +545,14 @@ int main(int argc, char **argv)
 
     /* settings.ini: devices by name, mode, language, effect parameters */
     VfSettings st;
+    g_st = &st;
     vf_settings_defaults(&st);
     char settings_file[VF_PATH_MAX] = "";
     int have_settings_path = vf_settings_path(settings_file, sizeof settings_file) == 0;
     if (init_ok && have_settings_path) vf_settings_load(&st, &s.pipe, settings_file);
     if (lang_arg) snprintf(st.language, sizeof st.language, "%s", lang_arg);
     vf_i18n_set(vf_lang_from_code(st.language));
+    apply_theme(vf_theme_find(st.theme));
     int autostart_on = vf_autostart_get();
 
     float *file_buf = NULL;
@@ -501,7 +587,22 @@ int main(int argc, char **argv)
     int sel_mode = mode >= 0 && mode <= 2 ? mode : (st.mode >= 0 && st.mode <= 2 ? st.mode : VF_OUT_VMIC);
     int sel_lang = (int)vf_i18n_get();
     int edit_in = 0, edit_out = 0, edit_preset = 0, edit_name = 0;
-    int tab = tab_arg >= 0 && tab_arg <= 4 ? tab_arg : 0;     /* effect page: 0 basic, 1 extra, 2 effects (--tab N for screenshots) */
+    U.tab = tab_arg >= 0 && tab_arg <= 4 ? tab_arg : 0;     /* 0..2 effect pages, 3 tools, 4 settings (--tab N for screenshots) */
+    U.compact = st.compact;
+    vf_undo_init(&U.undo, &s.pipe);
+    vf_snap_capture(&s.pipe, &U.seen);
+    vf_stats_init(&U.stats);
+    vf_ab_init(&U.ab);
+    vf_rec_init(&U.rec);
+    vf_spec_init(&U.spec);
+    U.scope_ready = vf_ring_init(&U.scope, 16384) == 0;
+    vf_automute_init(&U.am, vf_now_s());
+    U.hk_capture = -1;
+    U.app_active_rule = -1;
+    U.prev_sel_in = -2;
+    sync_hotkeys();
+    for (int i = 0; i < VF_BOARD_SLOTS; i++)
+        if (st.board_path[i][0] && vf_board_load(&s.board, i, st.board_path[i]) != 0) st.board_path[i][0] = '\0';
     static char list_in[LIST_CHARS], list_out[LIST_CHARS], list_presets[LIST_CHARS];
     g_demo = demo;
     build_list(list_in, sizeof list_in, &s.caps, "Microphone");
@@ -515,6 +616,7 @@ int main(int argc, char **argv)
     char ve_buf[32] = "";
 
     char status[300] = "", note[200] = "";
+    g_note = note; g_note_cap = sizeof note;
     if (!init_ok) snprintf(status, sizeof status, "%s", s.error);
 
     Meters m = { -120, -120, -120, -120, 0, 0, 0, 1, 0, 0 };
@@ -550,6 +652,7 @@ int main(int argc, char **argv)
             } else if (ev == VF_TRAY_QUIT) quit = 1;
             else if (ev == VF_TRAY_TOGGLE_BYPASS) atomic_store(&s.pipe.bypass_all, !atomic_load(&s.pipe.bypass_all));
             else if (ev == VF_TRAY_TOGGLE_RUN) { want_running = !want_running; retry_at = 0; applied_in = -2; }
+            else if (ev == VF_TRAY_TOGGLE_MUTE) vf_automute_toggle(&U.am, vf_now_s());
         }
         if (g_win_open) SetTargetFPS(IsWindowMinimized() ? 10 : IsWindowFocused() ? 60 : 30);   /* M4: draw less when not in use */
 
@@ -587,6 +690,8 @@ int main(int argc, char **argv)
                 c.monitor = sel_mode == VF_OUT_VMIC_MONITOR ? sel_mon : -1;
                 c.file_src = file_buf;
                 c.file_len = file_len;
+                c.monitor_gain_db = st.monitor_gain_db;
+                c.monitor_raw = st.monitor_raw;
                 if (vf_session_start(&s, &c) == 0) {
                     status[0] = '\0'; refresh_before_start = 0;
                     EngineLatency l;              /* device mixer not at 48 kHz -> resampler adds delay */
@@ -609,6 +714,11 @@ int main(int argc, char **argv)
             drain_meters(&s, &m, dt);
         }
         vf_tray_set_state(s.running, atomic_load(&s.pipe.bypass_all));
+        {
+            UiLink L = { &sel_in, &sel_preset, &shown_preset, presets, n_presets, m.vad,
+                         edit_in || edit_out || edit_preset || edit_name || ve_fx >= 0 || U.board_edit_on || U.hk_capture >= 0 };
+            ui_tick(&s, vf_now_s(), g_win_open, &L);
+        }
 
         /* ---- autosave settings.ini one second after the last change ---- */
         if (init_ok && have_settings_path) {
@@ -630,6 +740,14 @@ int main(int argc, char **argv)
             continue;
         }
 
+        if (U.compact) {
+            BeginDrawing();
+            draw_compact(&s, &st, &m);
+            EndDrawing();
+            if (shot && ++frame_no >= (frames_to_shot > 0 ? frames_to_shot : 60)) { TakeScreenshot(shot); break; }
+            continue;
+        }
+
         const Vector2 mouse = GetMousePosition();
         int cursor = MOUSE_CURSOR_DEFAULT;
 
@@ -640,14 +758,39 @@ int main(int argc, char **argv)
         /* ---- header: logo, subtitle, language ---- */
         DrawTexturePro(logo_tex, (Rectangle){ 0, 0, (float)logo_tex.width, (float)logo_tex.height },
                        (Rectangle){ 12, 6, 36, 36 }, (Vector2){ 0, 0 }, 0, WHITE);
-        glow_text(F.title, "MIC THINGY", 58, 8, C_NEON);
+        glow_text(F.title, "MIC THINGY", 58, 8, on_dark(C_NEON));
         const float logo_w = MeasureTextEx(F.title, "MIC THINGY", (float)F.title.baseSize, 0).x;
-        text(F.lcd, "v1.0", 66 + logo_w, 12, C_TEXT_DIM);
-        text(F.ui, tr(S_SUBTITLE), 66 + logo_w, 26, C_TEXT);
+        text(F.lcd, "v1.0", 66 + logo_w, 12, on_dark(C_TEXT_DIM));
+        text(F.ui, tr(S_SUBTITLE), 66 + logo_w, 26, on_dark(C_TEXT));
         {   /* blinking "power" LED */
             const int on = s.running && ((int)(vf_now_s() * 2) % 2 || !atomic_load(&s.pipe.bypass_all));
             DrawCircle(WIN_W - 128, 24, 6, on ? C_NEON : C_SEG_OFF);
-            if (on) DrawCircle(WIN_W - 128, 24, 12, (Color){ 57, 255, 20, 45 });
+            if (on) DrawCircle(WIN_W - 128, 24, 12, Fade(C_NEON, 0.18f));
+        }
+        /* undo / redo / hold-to-compare / mute / compact */
+        {
+            const int can_undo = vf_undo_can_undo(&U.undo), can_redo = vf_undo_can_redo(&U.undo);
+            if (!can_undo) GuiDisable();
+            if (GuiButton((Rectangle){ 520, 11, 56, 26 }, tr(S_UNDO)) && can_undo) {
+                vf_undo_commit(&U.undo, &s.pipe); vf_undo_undo(&U.undo, &s.pipe); vf_snap_capture(&s.pipe, &U.seen); U.undo_pending = 0;
+            }
+            GuiEnable();
+            if (!can_redo) GuiDisable();
+            if (GuiButton((Rectangle){ 580, 11, 56, 26 }, tr(S_REDO)) && can_redo) { vf_undo_redo(&U.undo, &s.pipe); vf_snap_capture(&s.pipe, &U.seen); U.undo_pending = 0; }
+            GuiEnable();
+            Rectangle cb = { 644, 11, 92, 26 };
+            GuiButton(cb, tr(S_COMPARE));
+            const int hold = CheckCollisionPointRec(mouse, cb) && IsMouseButtonDown(MOUSE_BUTTON_LEFT) && !GuiIsLocked();
+            if (hold && !U.comparing) { vf_snap_capture(&s.pipe, &U.cmp_snap); vf_preset_apply(&s.pipe, st.preset); U.comparing = 1; }
+            else if (!hold && U.comparing) { vf_snap_apply(&s.pipe, &U.cmp_snap); U.comparing = 0; vf_snap_capture(&s.pipe, &U.seen); U.undo_pending = 0; }
+            const int muted = vf_automute_effective(&U.am) || U.ptt_block;
+            GuiSetFont(F.bold);
+            if (onoff((Rectangle){ 748, 9, 150, 30 }, !muted, tr(S_MIC_ON), tr(S_MIC_MUTED)) != !muted) {
+                const int now_m = vf_automute_toggle(&U.am, vf_now_s());
+                snprintf(note, sizeof note, "%s", tr(now_m ? S_N_MUTED : S_N_UNMUTED));
+            }
+            GuiSetFont(F.ui);
+            if (GuiButton((Rectangle){ 906, 11, 56, 26 }, tr(S_COMPACT_BTN))) apply_window_mode(1);
         }
         int lang = sel_lang;
         GuiToggleGroup((Rectangle){ WIN_W - 104, 12, 42, 24 }, "EN;PL", &lang);
@@ -786,16 +929,16 @@ int main(int argc, char **argv)
             }
             if (over || vad_drag) cursor = MOUSE_CURSOR_RESIZE_EW;
             const int voice_ = s.running && m.vad >= thr;
-            led_bar(vb, m.vad, voice_ ? C_NEON : (Color){ 90, 150, 80, 255 });
+            led_bar(vb, m.vad, voice_ ? C_NEON : mixc(C_NEON, C_LCD_BG, 0.45f));
             const float tx = vb.x + vb.width * thr;
             DrawRectangle((int)tx - 1, (int)y - 3, 2, 24, C_AMBER);
             DrawTriangle((Vector2){ tx - 5, y - 8 }, (Vector2){ tx, y - 2 }, (Vector2){ tx + 5, y - 8 }, C_AMBER);
             DrawTriangle((Vector2){ tx, y + 20 }, (Vector2){ tx - 5, y + 26 }, (Vector2){ tx + 5, y + 26 }, C_AMBER);
-            if (over || vad_drag) DrawRectangleLinesEx(hit, 1, (Color){ 255, 190, 50, 90 });
+            if (over || vad_drag) DrawRectangleLinesEx(hit, 1, Fade(C_AMBER, 0.35f));
         }
         const int voice = s.running && m.vad >= thr;
         DrawCircle((int)(mx + mw - 10), (int)y + 9, 8, voice ? C_NEON : C_SEG_OFF);
-        if (voice) DrawCircle((int)(mx + mw - 10), (int)y + 9, 14, (Color){ 57, 255, 20, 50 });
+        if (voice) DrawCircle((int)(mx + mw - 10), (int)y + 9, 14, Fade(C_NEON, 0.2f));
         snprintf(t, sizeof t, tr(S_VAD_FMT), (int)(m.vad * 100 + 0.5f), (int)(thr * 100 + 0.5f));
         text(F.lcd, t, mx, y + 30, C_TEXT_DIM); y += 62;
 
@@ -803,7 +946,7 @@ int main(int argc, char **argv)
         snprintf(t, sizeof t, "%3d %%", (int)(m.gate * 100 + 0.5f));
         text(F.lcd, t, mx + mw - MeasureTextEx(F.lcd, t, 14, 0).x, y + 2, val_c);
         y += 22;
-        led_bar((Rectangle){ mx, y, mw, 18 }, s.running ? m.gate : 0.0f, (Color){ 80, 220, 160, 255 }); y += 40;
+        led_bar((Rectangle){ mx, y, mw, 18 }, s.running ? m.gate : 0.0f, mixc(C_NEON, C_TEXT, 0.35f)); y += 40;
 
         text(F.ui, tr(S_COMPRESSION), mx, y, C_TEXT);
         snprintf(t, sizeof t, "%5.1f dB", (double)m.gr);
@@ -835,11 +978,13 @@ int main(int argc, char **argv)
         text(F.lcd, t, mx, y, vf_session_xruns(&s) ? C_AMBER : C_TEXT_DIM);
 
         /* ---- effect panels: 3 columns x 2 rows, built from the parameter tables ---- */
-        GuiToggleGroup((Rectangle){ 282, TOP, 120, 24 }, tr(S_TABS_FX), &tab);
+        GuiToggleGroup((Rectangle){ 282, TOP, 120, 24 }, tr(S_TABS_ALL), &U.tab);
+        if (U.tab == 3) draw_tools((Rectangle){ 282, TOP + 30, 0, 0 }, &s, &st, sel_mode, sel_out, sel_mon);
+        else if (U.tab == 4) draw_settings((Rectangle){ 282, TOP + 30, 0, 0 }, &s, &st, presets, n_presets, &sel_preset, tray_ok);
         int slot = 0;
-        for (int i = 0; i < s.pipe.count; i++) {
+        for (int i = 0; i < s.pipe.count && U.tab <= 2; i++) {
             Fx *fx = s.pipe.fx[i];
-            if (fx->page != tab) continue;
+            if (fx->page != U.tab) continue;
             const float pw = 292, ph = 276;
             Rectangle box = { 282 + (slot % 3) * (pw + 6), TOP + 30 + (slot / 3) * (ph + 6), pw, ph };
             slot++;
@@ -869,7 +1014,7 @@ int main(int argc, char **argv)
                     py += 34;
                     continue;
                 }
-                text(F.ui, tr_param(fx->name, pi->name), box.x + 14, py, on ? C_TEXT : (Color){ 70, 77, 92, 255 });
+                text(F.ui, tr_param(fx->name, pi->name), box.x + 14, py, on ? C_TEXT : C_DISABLED);
                 char val[48];
                 const int ints = pi->max - pi->min >= 50.0f;
                 snprintf(val, sizeof val, ints ? "%.0f %s" : "%.2f %s", (double)v, pi->unit);
@@ -889,15 +1034,15 @@ int main(int argc, char **argv)
                 } else {
                     const int hot = on && !GuiIsLocked() && ve_fx < 0 && CheckCollisionPointRec(mouse, vr);
                     if (hot) {
-                        DrawRectangleRec(vr, (Color){ 57, 255, 20, 24 });
-                        DrawRectangleLinesEx(vr, 1, (Color){ 57, 255, 20, 120 });
+                        DrawRectangleRec(vr, Fade(C_NEON, 0.1f));
+                        DrawRectangleLinesEx(vr, 1, Fade(C_NEON, 0.47f));
                         cursor = MOUSE_CURSOR_IBEAM;
                         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                             ve_fx = i; ve_param = j;
                             snprintf(ve_buf, sizeof ve_buf, ints ? "%.0f" : "%.2f", (double)v);
                         }
                     }
-                    text(F.lcd, val, box.x + box.width - 14 - vw, py + 2, on ? C_NEON : (Color){ 70, 77, 92, 255 });
+                    text(F.lcd, val, box.x + box.width - 14 - vw, py + 2, on ? C_NEON : C_DISABLED);
                 }
                 Rectangle sr_ = { box.x + 14, py + 19, box.width - 28, 10 };
                 float nv = v;
@@ -931,11 +1076,11 @@ int main(int argc, char **argv)
         Rectangle sr = { 0, WIN_H - 26, WIN_W, 26 };
         lcd(sr);
         DrawRectangle(0, WIN_H - 27, WIN_W, 1, C_NEON);
-        text(F.lcd, "> ", 10, sr.y + 6, C_NEON);
-        text(F.lcd, sb, 30, sr.y + 6, status[0] ? C_RED : C_TEXT);
+        text(F.lcd, "> ", 10, sr.y + 6, on_dark(C_NEON));
+        text(F.lcd, sb, 30, sr.y + 6, status[0] ? on_dark(C_RED) : on_dark(C_TEXT));
         if ((int)(vf_now_s() * 2) % 2) {                       /* blinking block cursor */
             const float cw = MeasureTextEx(F.lcd, sb, 14, 0).x;
-            DrawRectangle((int)(34 + cw), (int)sr.y + 6, 8, 14, status[0] ? C_RED : C_NEON);
+            DrawRectangle((int)(34 + cw), (int)sr.y + 6, 8, 14, status[0] ? on_dark(C_RED) : on_dark(C_NEON));
         }
 
         /* ---- dropdowns last, so their open lists cover the rest ---- */
@@ -956,6 +1101,7 @@ int main(int argc, char **argv)
             shown_preset = sel_preset;
         }
 
+        ui_handle_drops(&s, &st);
         SetMouseCursor(cursor);
         EndDrawing();
 
@@ -965,11 +1111,18 @@ int main(int argc, char **argv)
         }
     }
 
+    remember_window_pos();
     /* final save (also catches changes made within the last second) */
     if (init_ok && have_settings_path && !shot) {
         fill_device_names(&st, &s, sel_in, sel_out, sel_mon, sel_mode);
         vf_settings_save(&st, &s.pipe, settings_file);
     }
+    if (vf_rec_active(&U.rec)) vf_rec_stop(&U.rec);
+    vf_rec_free(&U.rec);
+    vf_ab_free(&U.ab, NULL);
+    vf_overlay_stop();
+    atomic_store(&s.pipe.scope_ring, NULL);
+    vf_ring_free(&U.scope);
     vf_tray_stop();
     vf_session_free(&s);
     window_close();

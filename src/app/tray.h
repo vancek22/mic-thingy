@@ -8,13 +8,14 @@
 #ifndef VF_TRAY_H
 #define VF_TRAY_H
 
-enum { VF_TRAY_NONE = 0, VF_TRAY_SHOW, VF_TRAY_QUIT, VF_TRAY_TOGGLE_BYPASS, VF_TRAY_TOGGLE_RUN };
+enum { VF_TRAY_NONE = 0, VF_TRAY_SHOW, VF_TRAY_QUIT, VF_TRAY_TOGGLE_BYPASS, VF_TRAY_TOGGLE_RUN, VF_TRAY_TOGGLE_MUTE };
 
 int  vf_tray_start(void);                      /* 0 = icon visible */
 void vf_tray_stop(void);
 int  vf_tray_poll(void);                       /* next pending VF_TRAY_* event (main thread) */
 /* State shown in the tooltip and the menu check marks. */
 void vf_tray_set_state(int running, int bypass);
+void vf_tray_set_mute(int muted);               /* check mark + tooltip + icon */
 
 /* Single instance. Returns 1 if this is the first instance (keep running),
  * 0 if another one is already running (it has been asked to show itself). */

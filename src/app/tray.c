@@ -3,13 +3,13 @@
 #include <stdatomic.h>
 
 static atomic_int g_events[8];       /* tiny event queue: counters per event type */
-static atomic_int g_running, g_bypass;
+static atomic_int g_running, g_bypass, g_mute;
 
 static void post(int ev) { atomic_fetch_add(&g_events[ev], 1); }
 
 int vf_tray_poll(void)
 {
-    for (int ev = VF_TRAY_SHOW; ev <= VF_TRAY_TOGGLE_RUN; ev++) {
+    for (int ev = VF_TRAY_SHOW; ev <= VF_TRAY_TOGGLE_MUTE; ev++) {
         int n = atomic_load(&g_events[ev]);
         while (n > 0) {
             if (atomic_compare_exchange_weak(&g_events[ev], &n, n - 1)) return ev;
@@ -23,6 +23,8 @@ void vf_tray_set_state(int running, int bypass)
     atomic_store(&g_running, running);
     atomic_store(&g_bypass, bypass);
 }
+
+void vf_tray_set_mute(int muted) { atomic_store(&g_mute, muted ? 1 : 0); }
 
 /* ======================================================================= Windows */
 #ifdef _WIN32
@@ -40,6 +42,7 @@ void vf_tray_set_state(int running, int bypass)
 #define ID_RUN       2
 #define ID_BYPASS    3
 #define ID_QUIT      4
+#define ID_MUTE      5
 static const wchar_t *k_class = L"MicThingyTrayWindow";
 
 static HANDLE g_thread, g_ready;
@@ -47,7 +50,7 @@ static DWORD g_thread_id;
 static HWND g_hwnd;
 static NOTIFYICONDATAW g_nid;
 static HICON g_icon_on, g_icon_off;
-static int g_last_running = -1, g_last_bypass = -1, g_last_lang = -1;
+static int g_last_running = -1, g_last_bypass = -1, g_last_lang = -1, g_last_mute = -1;
 static UINT g_taskbar_created;
 
 /* The app icon (icon_art.c) at tray size: green waves = filtering, grey = stopped. */
@@ -94,14 +97,16 @@ static HICON make_icon(int active)
 static void update_icon(void)
 {
     int run = atomic_load(&g_running), byp = atomic_load(&g_bypass), lang = (int)vf_i18n_get();
-    if (run == g_last_running && byp == g_last_bypass && lang == g_last_lang) return;
+    const int mute = atomic_load(&g_mute);
+    if (run == g_last_running && byp == g_last_bypass && lang == g_last_lang && mute == g_last_mute) return;
     g_last_running = run;
+    g_last_mute = mute;
     g_last_bypass = byp;
     g_last_lang = lang;
     g_nid.uFlags = NIF_ICON | NIF_TIP;
-    g_nid.hIcon = run && !byp ? g_icon_on : g_icon_off;
+    g_nid.hIcon = run && !byp && !mute ? g_icon_on : g_icon_off;
     char tip[128];
-    snprintf(tip, sizeof tip, "mic thingy - %s", tr(!run ? S_TRAY_TIP_STOPPED : byp ? S_TRAY_TIP_BYPASS : S_TRAY_TIP_ON));
+    snprintf(tip, sizeof tip, "mic thingy - %s", tr(!run ? S_TRAY_TIP_STOPPED : mute ? S_TRAY_TIP_MUTED : byp ? S_TRAY_TIP_BYPASS : S_TRAY_TIP_ON));
     MultiByteToWideChar(CP_UTF8, 0, tip, -1, g_nid.szTip, (int)(sizeof g_nid.szTip / sizeof g_nid.szTip[0]));
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
 }
@@ -110,7 +115,7 @@ static void add_icon(void)
 {
     g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     Shell_NotifyIconW(NIM_ADD, &g_nid);
-    g_last_running = g_last_bypass = g_last_lang = -1;
+    g_last_running = g_last_bypass = g_last_lang = g_last_mute = -1;
     update_icon();
 }
 
@@ -118,13 +123,14 @@ static void show_menu(HWND h)
 {
     HMENU m = CreatePopupMenu();
     const int run = atomic_load(&g_running), byp = atomic_load(&g_bypass);
-    wchar_t w[4][96];
-    const VfStr ids[4] = { S_TRAY_SHOW, S_TRAY_PROCESSING, S_TRAY_FILTER, S_TRAY_QUIT };
-    for (int i = 0; i < 4; i++) MultiByteToWideChar(CP_UTF8, 0, tr(ids[i]), -1, w[i], 96);
+    wchar_t w[5][96];
+    const VfStr ids[5] = { S_TRAY_SHOW, S_TRAY_PROCESSING, S_TRAY_FILTER, S_TRAY_QUIT, S_TRAY_MUTE };
+    for (int i = 0; i < 5; i++) MultiByteToWideChar(CP_UTF8, 0, tr(ids[i]), -1, w[i], 96);
     AppendMenuW(m, MF_STRING, ID_SHOW, w[0]);
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING | (run ? MF_CHECKED : 0), ID_RUN, w[1]);
     AppendMenuW(m, MF_STRING | (run && !byp ? MF_CHECKED : 0) | (run ? 0 : MF_GRAYED), ID_BYPASS, w[2]);
+    AppendMenuW(m, MF_STRING | (atomic_load(&g_mute) ? MF_CHECKED : 0), ID_MUTE, w[4]);
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING, ID_QUIT, w[3]);
     SetMenuDefaultItem(m, ID_SHOW, FALSE);
@@ -136,6 +142,7 @@ static void show_menu(HWND h)
     if (cmd == ID_SHOW) post(VF_TRAY_SHOW);
     else if (cmd == ID_RUN) post(VF_TRAY_TOGGLE_RUN);
     else if (cmd == ID_BYPASS) post(VF_TRAY_TOGGLE_BYPASS);
+    else if (cmd == ID_MUTE) post(VF_TRAY_TOGGLE_MUTE);
     else if (cmd == ID_QUIT) post(VF_TRAY_QUIT);
 }
 

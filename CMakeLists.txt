@@ -87,7 +87,8 @@ add_library(vfcore STATIC
   src/app/session.c
   src/app/settings.c
   src/app/i18n.c
-  src/app/icon_art.c)
+  src/app/icon_art.c
+  src/app/overlay.c)
 target_include_directories(vfcore PUBLIC src)
 target_link_libraries(vfcore PUBLIC rnnoise miniaudio)
 

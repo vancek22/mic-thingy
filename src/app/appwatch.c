@@ -52,7 +52,11 @@ int vf_appwatch_list(char (*out)[VF_APP_NAME], int max)
     PROCESSENTRY32 pe;
     pe.dwSize = sizeof pe;
     if (Process32First(snap, &pe)) {
-        do { n = add_unique(out, n, max, pe.szExeFile); } while (Process32Next(snap, &pe));
+        do {
+            const char *nm = pe.szExeFile;
+            const size_t L = strlen(nm);
+            if (L > 4 && !_stricmp(nm + L - 4, ".exe")) n = add_unique(out, n, max, nm);   /* skips [System Process] and friends */
+        } while (Process32Next(snap, &pe));
     }
     CloseHandle(snap);
 #else
