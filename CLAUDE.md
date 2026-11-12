@@ -43,6 +43,12 @@ Linux: `sudo apt install build-essential cmake ninja-build libpipewire-0.3-dev l
    TTS has digital-silence pauses: its scores are optimistic. Audio stays in build/ (never commit user recordings).
 3. Single file: `build\voicefilter-file -i in.wav -o out.wav [-c "cmd"]... --debug dbg.wav --csv frames.csv`
    (`dbg.wav` = 4 channels: in, out, VAD, gate gain -> `ffmpeg -i dbg.wav -lavfi showwavespic=split_channels=1 x.png`).
+4. Real device latency (Windows, VB-Cable loop; bursts are audible to apps listening to CABLE Output - ask the user first):
+   `build\vf-latency [--period N] [--periods M] [--exclusive] [--seconds S]` plays bursts into "CABLE Input", records
+   "CABLE Output" in one miniaudio duplex device, prints the round trip. Measured 2026-11-12 (shared mode):
+   period 240x2 (engine default) ~75-88 ms, 120x2 ~58-74 ms, 480x2 ~98-108 ms, exclusive is worse (95-130 ms).
+   WASAPI shared capture on this machine is fixed at 480-frame periods; playback minimum is 128. Run-to-run spread
+   is +-8 ms (start-up alignment), so compare settings with several runs.
 Numbers are not a judgement of sound quality - the user listens; propose default changes, don't retune silently.
 
 ## Effect module interface (`src/dsp/fx.h`)
