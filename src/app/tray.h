@@ -1,4 +1,4 @@
-/* Notification-area (system tray) icon so VoiceFilter can keep running with its
+/* Notification-area (system tray) icon so mic thingy can keep running with its
  * window hidden. Windows: Shell_NotifyIcon on a private thread with its own hidden
  * message window. Other platforms: not available (vf_tray_start returns -1) - the
  * GUI then minimizes instead of hiding.

@@ -1,6 +1,6 @@
 # Runs the offline audio test matrix and prints objective metrics.
 #   powershell -ExecutionPolicy Bypass -File tools\run_audio_tests.ps1 [-Cmds "set gate threshold 0.4;set gate hold 200"]
-# Prerequisites: build (voicefilter-file, vf-eval) and tools\make_testset.ps1.
+# Prerequisites: build (mic-thingy-file, vf-eval) and tools\make_testset.ps1.
 # -Cmds: extra console commands (';'-separated) applied to every run, to compare settings.
 param(
     [string]$Build = (Join-Path $PSScriptRoot '..\build'),
@@ -12,7 +12,7 @@ $Build = (Resolve-Path $Build).Path
 $T = Join-Path $Build 'audiotest'
 $O = Join-Path $T "out_$Tag"
 New-Item -ItemType Directory -Force $O | Out-Null
-$vf = Join-Path $Build 'voicefilter-file.exe'
+$vf = Join-Path $Build 'mic-thingy-file.exe'
 $ev = Join-Path $Build 'vf-eval.exe'
 if (-not (Test-Path "$T\speech_pl.wav")) { throw 'run tools\make_testset.ps1 first' }
 # Windows PowerShell turns native stderr into terminating errors under 'Stop'.

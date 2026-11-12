@@ -1,6 +1,6 @@
-/* voicefilter-file: run the production effect chain over an audio file.
+/* mic-thingy-file: run the production effect chain over an audio file.
  *
- *   voicefilter-file -i in.wav -o out.wav [-c "set gate threshold 0.4"]... [--bypass]
+ *   mic-thingy-file -i in.wav -o out.wav [-c "set gate threshold 0.4"]... [--bypass]
  *                    [--debug dbg.wav] [--csv frames.csv]
  *
  * --debug writes a 4-channel WAV: input, output, VAD probability, gate gain
@@ -22,7 +22,7 @@
 static void usage(void)
 {
     fprintf(stderr,
-        "usage: voicefilter-file -i IN -o OUT [-c CMD]... [--bypass] [--debug DBG.wav] [--csv F.csv]\n"
+        "usage: mic-thingy-file -i IN -o OUT [-c CMD]... [--bypass] [--debug DBG.wav] [--csv F.csv]\n"
         "  CMD is any console command, e.g. -c \"set comp ratio 4\" -c \"bypass eq on\"\n");
 }
 

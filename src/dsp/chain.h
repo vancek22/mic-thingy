@@ -1,4 +1,4 @@
-/* The standard VoiceFilter chain:
+/* The standard mic thingy chain:
  * highpass -> rnnoise -> gate -> comp -> eq -> limiter */
 #ifndef VF_CHAIN_H
 #define VF_CHAIN_H

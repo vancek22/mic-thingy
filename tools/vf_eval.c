@@ -1,4 +1,4 @@
-/* vf-eval: objective measurements for VoiceFilter test runs.
+/* vf-eval: objective measurements for mic thingy test runs.
  *
  *   vf-eval mix   CLEAN NOISE SNR_DB OUT      mix speech with (looped) noise at an exact SNR
  *   vf-eval eval  CLEAN MIX PROCESSED [NAME]  metrics against a clean reference

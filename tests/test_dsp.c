@@ -663,14 +663,39 @@ static void test_settings_presets(void)
     pipeline_stop(&p1);
     pipeline_stop(&p2);
 
+    /* rename migration: settings of the old "VoiceFilter" folder move to the new one */
+    {
+        set_env("APPDATA", "vf_test_appdata");
+        set_env("XDG_CONFIG_HOME", "vf_test_appdata");
+        set_env("VF_CONFIG_DIR", "");
+#ifdef _WIN32
+        const char *old_dir = "vf_test_appdata\\VoiceFilter", *old_ini = "vf_test_appdata\\VoiceFilter\\settings.ini";
+#else
+        const char *old_dir = "vf_test_appdata/voicefilter", *old_ini = "vf_test_appdata/voicefilter/settings.ini";
+#endif
+        vf_mkdir_p(old_dir);
+        FILE *f = vf_fopen(old_ini, "wb");
+        if (f) { fputs("[app]\nlanguage = pl\n", f); fclose(f); }
+        char dir[VF_PATH_MAX], ini_path[VF_PATH_MAX];
+        CHECK(vf_config_dir(dir, sizeof dir) == 0, "config dir");
+        CHECK(vf_settings_path(ini_path, sizeof ini_path) == 0, "settings path");
+        VfSettings mg;
+        vf_settings_defaults(&mg);
+        CHECK(vf_settings_load(&mg, NULL, ini_path) == 0 && !strcmp(mg.language, "pl"),
+              "old VoiceFilter settings migrated to %s", dir);
+        CHECK(strstr(dir, "VoiceFilter") == NULL && strstr(dir, "voicefilter") == NULL, "new dir name %s", dir);
+        vf_remove(ini_path);
+        set_env("VF_CONFIG_DIR", "vf_test_config");
+    }
+
     /* autostart touches the real registry / ~/.config/autostart: opt-in only */
     const char *as = getenv("VF_TEST_AUTOSTART");
     if (as && *as == '1') {
         printf("  autostart (VF_TEST_AUTOSTART=1)\n");
-        CHECK(vf_autostart_set_named("VoiceFilter_selftest", 1) == 0, "autostart enable");
-        CHECK(vf_autostart_get_named("VoiceFilter_selftest") == 1, "autostart visible");
-        CHECK(vf_autostart_set_named("VoiceFilter_selftest", 0) == 0, "autostart disable");
-        CHECK(vf_autostart_get_named("VoiceFilter_selftest") == 0, "autostart removed");
+        CHECK(vf_autostart_set_named("MicThingy_selftest", 1) == 0, "autostart enable");
+        CHECK(vf_autostart_get_named("MicThingy_selftest") == 1, "autostart visible");
+        CHECK(vf_autostart_set_named("MicThingy_selftest", 0) == 0, "autostart disable");
+        CHECK(vf_autostart_get_named("MicThingy_selftest") == 0, "autostart removed");
     }
 }
 

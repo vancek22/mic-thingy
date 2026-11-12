@@ -15,3 +15,4 @@ compile_commands.json
 vf_test_config/
 *.tmp
 .cache/
+vf_test_appdata/

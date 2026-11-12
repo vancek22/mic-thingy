@@ -1,0 +1,3 @@
+// Windows resources for mic thingy. GLFW_ICON is picked up by GLFW as the window /
+// taskbar icon; being the only icon it is also the .exe icon in Explorer.
+GLFW_ICON ICON "@VF_ICON_PATH@"

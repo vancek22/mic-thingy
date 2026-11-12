@@ -180,7 +180,7 @@ int vf_settings_save(const VfSettings *s, const Pipeline *p, const char *path)
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
     FILE *f = vf_fopen(tmp, "wb");
     if (!f) return -1;
-    fprintf(f, "; VoiceFilter settings - written automatically, safe to edit while the app is closed\n"
+    fprintf(f, "; mic thingy settings - written automatically, safe to edit while the app is closed\n"
                "[audio]\ninput = %s\noutput = %s\nmonitor = %s\nmode = %s\nbypass = %d\n"
                "\n[app]\nlanguage = %s\nstart_processing = %d\nbackground = %d\npreset = %s\n",
             s->input, s->output, s->monitor, mode_name(s->mode), s->bypass,
@@ -291,7 +291,7 @@ int vf_preset_save(const Pipeline *p, const char *name)
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
     FILE *f = vf_fopen(tmp, "wb");
     if (!f) return -1;
-    fprintf(f, "; VoiceFilter preset \"%s\"\n", safe);
+    fprintf(f, "; mic thingy preset \"%s\"\n", safe);
     vf_fx_write_ini(f, p);
     if (fclose(f) != 0) { vf_remove(tmp); return -1; }
     return vf_replace_file(tmp, path);

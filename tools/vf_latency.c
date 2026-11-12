@@ -3,7 +3,7 @@
  *   vf-latency [--out "CABLE Input"] [--in "CABLE Output"] [--period N] [--periods M]
  *              [--exclusive] [--seconds S] [--duplex|--separate]
  *
- * A duplex miniaudio device (same configuration style as the VoiceFilter engine)
+ * A duplex miniaudio device (same configuration style as the mic thingy engine)
  * plays short tone bursts to --out and records --in. With VB-Cable the signal goes
  * CABLE Input -> CABLE Output, so the measured lag = playback buffering + cable +
  * capture buffering (+ miniaudio's duplex coupling). Analysis runs after the

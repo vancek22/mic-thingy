@@ -31,6 +31,7 @@ void vf_tray_set_state(int running, int bypass)
 #include <stdio.h>
 #include <wchar.h>
 #include "app/i18n.h"
+#include "app/icon_art.h"
 
 #define WM_TRAY      (WM_APP + 1)
 #define WM_SHOWMAIN  (WM_APP + 2)        /* sent by a second instance */
@@ -39,7 +40,7 @@ void vf_tray_set_state(int running, int bypass)
 #define ID_RUN       2
 #define ID_BYPASS    3
 #define ID_QUIT      4
-static const wchar_t *k_class = L"VoiceFilterTrayWindow";
+static const wchar_t *k_class = L"MicThingyTrayWindow";
 
 static HANDLE g_thread, g_ready;
 static DWORD g_thread_id;
@@ -49,10 +50,10 @@ static HICON g_icon_on, g_icon_off;
 static int g_last_running = -1, g_last_bypass = -1, g_last_lang = -1;
 static UINT g_taskbar_created;
 
-/* 16x16 microphone-ish icon drawn at runtime (green = filtering, grey = stopped). */
-static HICON make_icon(COLORREF c)
+/* The app icon (icon_art.c) at tray size: green waves = filtering, grey = stopped. */
+static HICON make_icon(int active)
 {
-    const int S = 32;
+    const int S = GetSystemMetrics(SM_CXSMICON) > 16 ? 32 : 16;
     BITMAPV5HEADER bh;
     ZeroMemory(&bh, sizeof bh);
     bh.bV5Size = sizeof bh;
@@ -71,23 +72,13 @@ static HICON make_icon(COLORREF c)
     ReleaseDC(NULL, dc);
     if (!color || !bits) return LoadIcon(NULL, IDI_APPLICATION);
     DWORD *px = (DWORD *)bits;
-    const DWORD rgb = (DWORD)(GetRValue(c) << 16 | GetGValue(c) << 8 | GetBValue(c));
-    for (int y = 0; y < S; y++)
-        for (int x = 0; x < S; x++) {
-            const int dx = x - 16;
-            int on = 0;
-            /* capsule: rectangle 11..21 x 8..14 with round ends of radius 5 */
-            if (dx >= -5 && dx <= 5 && y >= 8 && y <= 14) on = 1;
-            if (dx * dx + (y - 8) * (y - 8) <= 25 && y < 8) on = 1;
-            if (dx * dx + (y - 14) * (y - 14) <= 25 && y > 14) on = 1;
-            /* cradle: lower half-ring around the capsule */
-            const int r2 = dx * dx + (y - 14) * (y - 14);
-            if (y >= 14 && r2 >= 64 && r2 <= 100) on = 1;
-            if (dx >= -1 && dx <= 1 && y >= 24 && y <= 28) on = 1;   /* stem */
-            if (dx >= -6 && dx <= 6 && y >= 28 && y <= 30) on = 1;   /* base */
-            px[y * S + x] = on ? (0xFF000000u | rgb) : 0;
-        }
-    static const unsigned char zero_mask[32 * 32 / 8] = { 0 };  /* alpha channel does the masking */
+    unsigned char rgba[32 * 32 * 4];
+    vf_icon_render(rgba, S, active);
+    for (int i = 0; i < S * S; i++) {                /* premultiplied BGRA for the DIB */
+        const unsigned a = rgba[4 * i + 3];
+        px[i] = a << 24 | (rgba[4 * i] * a / 255) << 16 | (rgba[4 * i + 1] * a / 255) << 8 | (rgba[4 * i + 2] * a / 255);
+    }
+    static const unsigned char zero_mask[32 * 32 / 8] = { 0 };  /* alpha channel does the masking (16 or 32 px) */
     HBITMAP mask = CreateBitmap(S, S, 1, 1, zero_mask);
     ICONINFO ii;
     ZeroMemory(&ii, sizeof ii);
@@ -110,7 +101,7 @@ static void update_icon(void)
     g_nid.uFlags = NIF_ICON | NIF_TIP;
     g_nid.hIcon = run && !byp ? g_icon_on : g_icon_off;
     char tip[128];
-    snprintf(tip, sizeof tip, "VoiceFilter - %s", tr(!run ? S_TRAY_TIP_STOPPED : byp ? S_TRAY_TIP_BYPASS : S_TRAY_TIP_ON));
+    snprintf(tip, sizeof tip, "mic thingy - %s", tr(!run ? S_TRAY_TIP_STOPPED : byp ? S_TRAY_TIP_BYPASS : S_TRAY_TIP_ON));
     MultiByteToWideChar(CP_UTF8, 0, tip, -1, g_nid.szTip, (int)(sizeof g_nid.szTip / sizeof g_nid.szTip[0]));
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
 }
@@ -176,10 +167,10 @@ static DWORD WINAPI tray_thread(LPVOID arg)
     RegisterClassW(&wc);
     g_taskbar_created = RegisterWindowMessageW(L"TaskbarCreated");
     /* a normal top-level (but never shown) window: message-only windows don't get TaskbarCreated */
-    g_hwnd = CreateWindowExW(0, k_class, L"VoiceFilter", 0, 0, 0, 0, 0, NULL, NULL, inst, NULL);
+    g_hwnd = CreateWindowExW(0, k_class, L"mic thingy", 0, 0, 0, 0, 0, NULL, NULL, inst, NULL);
     if (!g_hwnd) { SetEvent(g_ready); return 1; }
-    g_icon_on = make_icon(RGB(40, 170, 80));
-    g_icon_off = make_icon(RGB(140, 140, 140));
+    g_icon_on = make_icon(1);
+    g_icon_off = make_icon(0);
     ZeroMemory(&g_nid, sizeof g_nid);
     g_nid.cbSize = sizeof g_nid;
     g_nid.hWnd = g_hwnd;
@@ -224,7 +215,7 @@ void vf_tray_stop(void)
 int vf_single_instance(void)
 {
     static HANDLE mutex;
-    mutex = CreateMutexW(NULL, TRUE, L"Local\\VoiceFilterSingleInstance");
+    mutex = CreateMutexW(NULL, TRUE, L"Local\\MicThingySingleInstance");
     if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND other = FindWindowW(k_class, NULL);
         if (other) PostMessageW(other, WM_SHOWMAIN, 0, 0);
@@ -248,7 +239,7 @@ int vf_single_instance(void)
 {
     char dir[VF_PATH_MAX], path[VF_PATH_MAX + 32];
     if (vf_config_dir(dir, sizeof dir)) return 1;
-    snprintf(path, sizeof path, "%s/voicefilter.lock", dir);
+    snprintf(path, sizeof path, "%s/mic-thingy.lock", dir);
     int fd = open(path, O_RDWR | O_CREAT, 0644);
     if (fd < 0) return 1;
     if (flock(fd, LOCK_EX | LOCK_NB) != 0) { close(fd); return 0; }

@@ -1,12 +1,12 @@
-/* VoiceFilter console front-end.
+/* mic thingy console front-end.
  *
- *   voicefilter-cli [--in N] [--out N] [--vmic] [--monitor N] [--period N]
+ *   mic-thingy-cli [--in N] [--out N] [--vmic] [--monitor N] [--period N]
  *                   [--in-file f.wav] [--seconds S] [-c "cmd"]...
  *
  * Output modes:
  *   headphones          mic -> chain -> chosen playback device
  *   virtual mic         Windows: mic -> chain -> "CABLE Input" (apps pick "CABLE Output")
- *                       Linux:   mic -> chain -> PipeWire source "VoiceFilter Microphone"
+ *                       Linux:   mic -> chain -> PipeWire source "mic thingy microphone"
  *   virtual mic+monitor as above, plus the processed voice on headphones */
 #include <math.h>
 #include <stdio.h>
@@ -66,7 +66,7 @@ static void meter(char *dst, size_t n, float db)   /* -60..0 dB over 20 cells */
 
 static void usage(void)
 {
-    printf("usage: voicefilter-cli [--in N] [--out N] [--vmic] [--monitor N] [--period N]\n"
+    printf("usage: mic-thingy-cli [--in N] [--out N] [--vmic] [--monitor N] [--period N]\n"
            "                       [--in-file f.wav] [--seconds S] [-c \"cmd\"]...\n"
            "  --vmic        output to the virtual microphone (Windows: VB-Cable, Linux: PipeWire)\n"
            "  --monitor N   also play the processed voice on playback device N\n"
@@ -100,7 +100,7 @@ int main(int argc, char **argv)
     vf_console_init();
     static VfSession s;
     if (vf_session_init(&s, 0) != 0) { fprintf(stderr, "%s\n", s.error); return 1; }
-    printf("VoiceFilter - backend: %s\n", ma_get_backend_name(s.ctx.backend));
+    printf("mic thingy - backend: %s\n", ma_get_backend_name(s.ctx.backend));
     char cfg_path[VF_PATH_MAX];
     if (!no_config && vf_settings_path(cfg_path, sizeof cfg_path) == 0) {
         VfSettings st;

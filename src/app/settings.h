@@ -19,7 +19,7 @@ typedef struct VfSettings {
     int  mode;                 /* VfOutMode */
     int  bypass;
     int  start_processing;
-    int  background;           /* closing the window keeps VoiceFilter running (tray) */
+    int  background;           /* closing the window keeps mic thingy running (tray) */
     char preset[64];           /* built-in key ("default", "podcast"...) or user preset name */
     char language[8];          /* "en" (default) or "pl" */
 } VfSettings;

@@ -50,7 +50,7 @@ int vf_vmic_start(VfSink *sink)
     pw_init(NULL, NULL);
     g.pw_inited = 1;
 
-    g.loop = pw_thread_loop_new("voicefilter-vmic", NULL);
+    g.loop = pw_thread_loop_new("mic-thingy-vmic", NULL);
     if (!g.loop) goto fail;
 
     struct pw_properties *props = pw_properties_new(

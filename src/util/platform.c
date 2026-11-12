@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define VF_AUTOSTART_NAME "VoiceFilter"
+#define VF_AUTOSTART_NAME "mic thingy"
 #define VF_AUTOSTART_ARGS "--autostart --minimized"
 
 /* ======================================================================= Windows */
@@ -66,7 +66,14 @@ int vf_config_dir(char *out, size_t n)
         if (to_u8(ov, out, (int)n)) return -1;
     } else {
         if (!app || to_u8(app, base, VF_PATH_MAX)) return -1;
-        if ((size_t)snprintf(out, n, "%s\\VoiceFilter", base) >= n) return -1;
+        if ((size_t)snprintf(out, n, "%s\\mic thingy", base) >= n) return -1;
+        /* the app was called VoiceFilter before: carry its settings and presets over once */
+        wchar_t wnew[VF_PATH_MAX], wold[VF_PATH_MAX + 16];
+        char old[VF_PATH_MAX + 16];
+        snprintf(old, sizeof old, "%s\\VoiceFilter", base);
+        if (!to_w(out, wnew, VF_PATH_MAX) && !to_w(old, wold, VF_PATH_MAX + 16) &&
+            GetFileAttributesW(wnew) == INVALID_FILE_ATTRIBUTES && GetFileAttributesW(wold) != INVALID_FILE_ATTRIBUTES)
+            MoveFileW(wold, wnew);
     }
     return vf_mkdir_p(out);
 }
@@ -178,9 +185,12 @@ int vf_config_dir(char *out, size_t n)
     if (ov && *ov) {
         if ((size_t)snprintf(out, n, "%s", ov) >= n) return -1;
     } else {
-        char base[VF_PATH_MAX];
+        char base[VF_PATH_MAX], old[VF_PATH_MAX + 16];
         if (xdg_config_home(base, sizeof base)) return -1;
-        if ((size_t)snprintf(out, n, "%s/voicefilter", base) >= n) return -1;
+        if ((size_t)snprintf(out, n, "%s/mic-thingy", base) >= n) return -1;
+        /* the app was called VoiceFilter before: carry its settings and presets over once */
+        snprintf(old, sizeof old, "%s/voicefilter", base);
+        if (access(out, F_OK) != 0 && access(old, F_OK) == 0) rename(old, out);
     }
     return vf_mkdir_p(out);
 }
@@ -215,9 +225,11 @@ int vf_executable_path(char *out, size_t n)
 
 static int desktop_path(const char *name, char *out, size_t n)
 {
-    char base[VF_PATH_MAX];
+    char base[VF_PATH_MAX], file[128];
     if (xdg_config_home(base, sizeof base)) return -1;
-    return (size_t)snprintf(out, n, "%s/autostart/%s.desktop", base, name) < n ? 0 : -1;
+    snprintf(file, sizeof file, "%s", name);
+    for (char *c = file; *c; c++) if (*c == ' ') *c = '-';   /* "mic thingy" -> mic-thingy.desktop */
+    return (size_t)snprintf(out, n, "%s/autostart/%s.desktop", base, file) < n ? 0 : -1;
 }
 
 int vf_autostart_get_named(const char *name)
@@ -238,12 +250,25 @@ int vf_autostart_set_named(const char *name, int enable)
     if (vf_mkdir_p(dir) || vf_executable_path(exe, sizeof exe)) return -1;
     FILE *f = fopen(p, "w");
     if (!f) return -1;
-    fprintf(f, "[Desktop Entry]\nType=Application\nName=VoiceFilter\n"
+    fprintf(f, "[Desktop Entry]\nType=Application\nName=mic thingy\n"
                "Comment=Real-time microphone noise filter\n"
                "Exec=\"%s\" " VF_AUTOSTART_ARGS "\nTerminal=false\nX-GNOME-Autostart-enabled=true\n", exe);
     return fclose(f) == 0 ? 0 : -1;
 }
 #endif
+
+int vf_autostart_migrate(void)
+{
+#ifdef _WIN32
+    const char *old = "VoiceFilter";
+#else
+    const char *old = "voicefilter";
+#endif
+    if (!vf_autostart_get_named(old)) return 0;
+    vf_autostart_set_named(old, 0);
+    vf_autostart_set_named(VF_AUTOSTART_NAME, 1);
+    return 1;
+}
 
 int vf_autostart_get(void) { return vf_autostart_get_named(VF_AUTOSTART_NAME); }
 int vf_autostart_set(int enable) { return vf_autostart_set_named(VF_AUTOSTART_NAME, enable); }

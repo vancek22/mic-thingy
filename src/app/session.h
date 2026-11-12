@@ -1,4 +1,4 @@
-/* VfSession: everything needed to run VoiceFilter - audio context, device lists,
+/* VfSession: everything needed to run mic thingy - audio context, device lists,
  * the effect chain (kept across restarts, so parameters survive a device change),
  * the engine and the optional virtual-mic / monitor outputs.
  * Shared by the console and the GUI front-ends. Control thread only. */

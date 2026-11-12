@@ -8,7 +8,8 @@
 
 static int is_virtual_input(const char *name)
 {
-    return vf_contains_ci(name, "CABLE Output") || vf_contains_ci(name, "VoiceFilter");
+    return vf_contains_ci(name, "CABLE Output") || vf_contains_ci(name, "mic thingy") ||
+           vf_contains_ci(name, "VoiceFilter");          /* source name of older builds */
 }
 
 int vf_session_init(VfSession *s, int with_meters)

@@ -1,6 +1,6 @@
-/* VoiceFilter GUI (raylib + raygui) - early-2000s "green phosphor" look.
+/* mic thingy GUI (raylib + raygui) - early-2000s "green phosphor" look.
  *
- *   voicefilter [--autostart] [--minimized] [--mode 0|1|2] [--lang en|pl] [--in-file f.wav]
+ *   mic-thingy [--autostart] [--minimized] [--mode 0|1|2] [--lang en|pl] [--in-file f.wav]
  *               [--screenshot shot.png --frames N] [--verbose]
  *
  * The audio runs on miniaudio's thread; this thread only writes parameters
@@ -15,7 +15,9 @@
 #include "raygui.h"
 
 #include "app/i18n.h"
+#include "app/icon_art.h"
 #include "app/session.h"
+#include "app/win_chrome.h"
 #include "app/settings.h"
 #include "app/tray.h"
 #include "util/platform.h"
@@ -399,7 +401,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--minimized")) minimized = 1;
     }
 
-    /* One VoiceFilter at a time: a second launch (e.g. autostart + manual) would
+    /* One mic thingy at a time: a second launch (e.g. autostart + manual) would
      * open the microphone twice and feed the virtual mic twice. */
     if (!shot && !vf_single_instance()) return 0;     /* the running one shows its window */
 
@@ -427,13 +429,23 @@ int main(int argc, char **argv)
 
     SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | (start_hidden ? FLAG_WINDOW_HIDDEN : 0));
     SetTraceLogLevel(verbose ? LOG_INFO : LOG_WARNING);
-    InitWindow(WIN_W, WIN_H, "VoiceFilter");
-    TraceLog(LOG_INFO, "VoiceFilter: tray %s, background %d, start hidden %d",
+    InitWindow(WIN_W, WIN_H, "mic thingy");
+    TraceLog(LOG_INFO, "mic thingy: tray %s, background %d, start hidden %d",
              tray_ok ? "ok" : "unavailable", st.background, start_hidden);
     SetWindowState(FLAG_WINDOW_ALWAYS_RUN);       /* keep the loop alive while minimized/hidden */
     SetExitKey(KEY_NULL);                         /* Esc must not quit */
     SetTargetFPS(60);
     if (minimized && !start_hidden) MinimizeWindow();
+    /* window icon (Windows also gets it from the .exe resource) and a title bar in the
+     * header colour instead of the white system one */
+    {
+        static unsigned char px[64 * 64 * 4];
+        vf_icon_render(px, 64, 1);
+        Image icon = { px, 64, 64, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+        SetWindowIcon(icon);
+        vf_window_style_titlebar(GetWindowHandle(), 0x3A445C, 0xDCE6F5, 0x2A3140);
+    }
+    if (vf_autostart_migrate()) autostart_on = 1;   /* old "VoiceFilter" entry -> this exe */
     load_fonts();
     apply_style();
 
@@ -461,6 +473,8 @@ int main(int argc, char **argv)
     build_preset_list(list_presets, sizeof list_presets, presets, &n_presets);
     for (int i = 0; i < n_presets; i++) if (!strcmp(presets[i].name, st.preset)) sel_preset = shown_preset = i;
     char preset_name[64] = "";
+    int ve_fx = -1, ve_param = -1, vad_drag = 0;     /* value being typed / VAD threshold drag */
+    char ve_buf[32] = "";
 
     char status[300] = "", note[200] = "";
     if (!init_ok) snprintf(status, sizeof status, "%s", s.error);
@@ -570,13 +584,16 @@ int main(int argc, char **argv)
             continue;
         }
 
+        const Vector2 mouse = GetMousePosition();
+        int cursor = MOUSE_CURSOR_DEFAULT;
+
         BeginDrawing();
         background();
         if (edit_in || edit_out || edit_preset) GuiLock();
 
         /* ---- header: logo, subtitle, language ---- */
-        glow_text(F.title, "VOICEFILTER", 18, 8, C_NEON);
-        const float logo_w = MeasureTextEx(F.title, "VOICEFILTER", (float)F.title.baseSize, 0).x;
+        glow_text(F.title, "MIC THINGY", 18, 8, C_NEON);
+        const float logo_w = MeasureTextEx(F.title, "MIC THINGY", (float)F.title.baseSize, 0).x;
         text(F.lcd, "v1.0", 26 + logo_w, 12, C_TEXT_DIM);
         text(F.ui, tr(S_SUBTITLE), 26 + logo_w, 26, C_TEXT);
         {   /* blinking "power" LED */
@@ -702,15 +719,37 @@ int main(int argc, char **argv)
 
         /* VAD with the gate threshold marker and a "voice" lamp */
         const int gi = pipeline_find_fx(&s.pipe, "gate");
-        const float thr = gi >= 0 ? pipeline_get_param(&s.pipe, gi, 0) : 0.5f;
-        const int voice = s.running && m.vad >= thr;
+        float thr = gi >= 0 ? pipeline_get_param(&s.pipe, gi, 0) : 0.5f;
         text(F.ui, tr(S_VAD), mx, y, C_TEXT); y += 22;
-        led_bar((Rectangle){ mx, y, mw - 30, 18 }, m.vad, voice ? C_NEON : (Color){ 90, 150, 80, 255 });
-        DrawRectangle((int)(mx + (mw - 30) * thr) - 1, (int)y - 3, 2, 24, C_AMBER);
+        {   /* the amber marker is the gate threshold: drag it (or use the wheel) to change it */
+            Rectangle vb = { mx, y, mw - 30, 18 };
+            Rectangle hit = { vb.x - 4, vb.y - 6, vb.width + 8, vb.height + 12 };
+            const int over = gi >= 0 && !GuiIsLocked() && ve_fx < 0 && CheckCollisionPointRec(mouse, hit);
+            if (over && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) vad_drag = 1;
+            if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) vad_drag = 0;
+            if (vad_drag) {
+                thr = (mouse.x - vb.x) / vb.width;
+                thr = thr < 0 ? 0 : thr > 1 ? 1 : roundf(thr * 100.0f) / 100.0f;
+                pipeline_set_param(&s.pipe, gi, 0, thr);
+            } else if (over && GetMouseWheelMove() != 0) {
+                thr += GetMouseWheelMove() * 0.01f;
+                pipeline_set_param(&s.pipe, gi, 0, thr);
+                thr = pipeline_get_param(&s.pipe, gi, 0);
+            }
+            if (over || vad_drag) cursor = MOUSE_CURSOR_RESIZE_EW;
+            const int voice_ = s.running && m.vad >= thr;
+            led_bar(vb, m.vad, voice_ ? C_NEON : (Color){ 90, 150, 80, 255 });
+            const float tx = vb.x + vb.width * thr;
+            DrawRectangle((int)tx - 1, (int)y - 3, 2, 24, C_AMBER);
+            DrawTriangle((Vector2){ tx - 5, y - 8 }, (Vector2){ tx, y - 2 }, (Vector2){ tx + 5, y - 8 }, C_AMBER);
+            DrawTriangle((Vector2){ tx, y + 20 }, (Vector2){ tx - 5, y + 26 }, (Vector2){ tx + 5, y + 26 }, C_AMBER);
+            if (over || vad_drag) DrawRectangleLinesEx(hit, 1, (Color){ 255, 190, 50, 90 });
+        }
+        const int voice = s.running && m.vad >= thr;
         DrawCircle((int)(mx + mw - 10), (int)y + 9, 8, voice ? C_NEON : C_SEG_OFF);
         if (voice) DrawCircle((int)(mx + mw - 10), (int)y + 9, 14, (Color){ 57, 255, 20, 50 });
         snprintf(t, sizeof t, tr(S_VAD_FMT), (int)(m.vad * 100 + 0.5f), (int)(thr * 100 + 0.5f));
-        text(F.lcd, t, mx, y + 24, C_TEXT_DIM); y += 56;
+        text(F.lcd, t, mx, y + 30, C_TEXT_DIM); y += 62;
 
         text(F.ui, tr(S_GATE_OPEN), mx, y, C_TEXT);
         snprintf(t, sizeof t, "%3d %%", (int)(m.gate * 100 + 0.5f));
@@ -783,9 +822,43 @@ int main(int argc, char **argv)
                 const int ints = pi->max - pi->min >= 50.0f;
                 snprintf(val, sizeof val, ints ? "%.0f %s" : "%.2f %s", (double)v, pi->unit);
                 const float vw = MeasureTextEx(F.lcd, val, 14, 0).x;
-                text(F.lcd, val, box.x + box.width - 14 - vw, py + 2, on ? C_NEON : (Color){ 70, 77, 92, 255 });
+                const float ew = fmaxf(vw, 70);
+                Rectangle vr = { box.x + box.width - 14 - ew, py - 3, ew + 2, 21 };
+                if (ve_fx == i && ve_param == j) {
+                    /* typing an exact value: Enter or click elsewhere applies, Esc cancels */
+                    if (IsKeyPressed(KEY_ESCAPE)) ve_fx = -1;
+                    else if (GuiTextBox(vr, ve_buf, sizeof ve_buf - 1, true)) {
+                        for (char *c = ve_buf; *c; c++) if (*c == ',') *c = '.';   /* "0,5" works too */
+                        char *end;
+                        const float x = strtof(ve_buf, &end);
+                        if (end != ve_buf) pipeline_set_param(&s.pipe, i, j, ints ? roundf(x) : x);
+                        ve_fx = -1;
+                    }
+                } else {
+                    const int hot = on && !GuiIsLocked() && ve_fx < 0 && CheckCollisionPointRec(mouse, vr);
+                    if (hot) {
+                        DrawRectangleRec(vr, (Color){ 57, 255, 20, 24 });
+                        DrawRectangleLinesEx(vr, 1, (Color){ 57, 255, 20, 120 });
+                        cursor = MOUSE_CURSOR_IBEAM;
+                        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                            ve_fx = i; ve_param = j;
+                            snprintf(ve_buf, sizeof ve_buf, ints ? "%.0f" : "%.2f", (double)v);
+                        }
+                    }
+                    text(F.lcd, val, box.x + box.width - 14 - vw, py + 2, on ? C_NEON : (Color){ 70, 77, 92, 255 });
+                }
+                Rectangle sr_ = { box.x + 14, py + 19, box.width - 28, 10 };
                 float nv = v;
-                GuiSliderBar((Rectangle){ box.x + 14, py + 19, box.width - 28, 10 }, NULL, NULL, &nv, pi->min, pi->max);
+                GuiSliderBar(sr_, NULL, NULL, &nv, pi->min, pi->max);
+                /* mouse wheel over a slider: fine steps (Shift = 10x finer) */
+                const float wheel = GetMouseWheelMove();
+                if (on && wheel != 0 && !GuiIsLocked() &&
+                    CheckCollisionPointRec(mouse, (Rectangle){ sr_.x, sr_.y - 8, sr_.width, sr_.height + 14 })) {
+                    float step = (pi->max - pi->min) / 100.0f;
+                    if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) step /= 10.0f;
+                    if (ints && step < 1.0f) step = 1.0f;
+                    nv = v + wheel * step;
+                }
                 if (nv != v) {
                     if (ints) nv = roundf(nv);
                     pipeline_set_param(&s.pipe, i, j, nv);
@@ -831,6 +904,7 @@ int main(int argc, char **argv)
             shown_preset = sel_preset;
         }
 
+        SetMouseCursor(cursor);
         EndDrawing();
 
         if (shot && ++frame_no >= (frames_to_shot > 0 ? frames_to_shot : 60)) {
