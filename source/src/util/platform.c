@@ -171,13 +171,47 @@ int vf_startmenu_exists(void)
     return startmenu_lnk(p, MAX_PATH + 32) == 0 && GetFileAttributesW(p) != INVALID_FILE_ATTRIBUTES;
 }
 
+/* The shortcut must not break when a build folder is moved or deleted, so it points at a private copy:
+ * %LOCALAPPDATA%\Programs\mic thingy\mic-thingy.exe. Running any newer mic-thingy.exe refreshes that copy
+ * (only if the running file is newer; a copy that is in use is renamed aside first, which Windows allows). */
+static int installed_exe(const wchar_t *self, wchar_t *out, size_t n)
+{
+    wchar_t base[MAX_PATH], dir[MAX_PATH + 40];
+    if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, base) != S_OK) return -1;
+    if ((size_t)swprintf(dir, MAX_PATH + 40, L"%ls\\Programs\\mic thingy", base) >= MAX_PATH + 40) return -1;
+    if ((size_t)swprintf(out, n, L"%ls\\mic-thingy.exe", dir) >= n) return -1;
+    if (_wcsicmp(self, out) == 0) return 0;                              /* already running from there */
+
+    WIN32_FILE_ATTRIBUTE_DATA src, dst;
+    if (!GetFileAttributesExW(self, GetFileExInfoStandard, &src)) return -1;
+    const int have = GetFileAttributesExW(out, GetFileExInfoStandard, &dst) != 0;
+    if (have && CompareFileTime(&src.ftLastWriteTime, &dst.ftLastWriteTime) <= 0) return 0;   /* the copy is current */
+
+    wchar_t *p = wcschr(dir + 3, L'\\');                                  /* create Programs\mic thingy step by step */
+    while (p) { *p = 0; CreateDirectoryW(dir, NULL); *p = L'\\'; p = wcschr(p + 1, L'\\'); }
+    CreateDirectoryW(dir, NULL);
+    wchar_t old[MAX_PATH + 40];
+    swprintf(old, MAX_PATH + 40, L"%ls.old", out);
+    DeleteFileW(old);
+    if (have) MoveFileExW(out, old, MOVEFILE_REPLACE_EXISTING);           /* works even while that copy runs */
+    if (!CopyFileW(self, out, FALSE)) {
+        if (have) MoveFileExW(old, out, MOVEFILE_REPLACE_EXISTING);       /* put the previous copy back */
+        return have ? 0 : -1;
+    }
+    DeleteFileW(old);                                                     /* fails while the old copy runs: harmless */
+    return 0;
+}
+
 int vf_startmenu_set(int enable)
 {
-    wchar_t lnk[MAX_PATH + 32], exe[MAX_PATH];
+    wchar_t lnk[MAX_PATH + 32], self[MAX_PATH], exe[MAX_PATH];
     if (startmenu_lnk(lnk, MAX_PATH + 32)) return -1;
     if (!enable) return (DeleteFileW(lnk) || GetLastError() == ERROR_FILE_NOT_FOUND) ? 0 : -1;
-    const DWORD el = GetModuleFileNameW(NULL, exe, MAX_PATH);
+    const DWORD el = GetModuleFileNameW(NULL, self, MAX_PATH);
     if (el == 0 || el >= MAX_PATH) return -1;
+    wcscpy(exe, self);
+    wchar_t inst[MAX_PATH];
+    if (installed_exe(self, inst, MAX_PATH) == 0 && GetFileAttributesW(inst) != INVALID_FILE_ATTRIBUTES) wcscpy(exe, inst);
 
     const HRESULT ci = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     const int own = SUCCEEDED(ci);                      /* RPC_E_CHANGED_MODE: COM already up in another mode - still usable */

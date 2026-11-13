@@ -287,3 +287,7 @@ built from the tag, never taken from the response. 404 = "no release published y
 **Windows search / Start menu**: `vf_startmenu_set()` (platform.c, IShellLink) keeps `%APPDATA%\Microsoft\Windows\Start Menu\Programs\mic thingy.lnk`
 pointing at the running exe (created / repaired at GUI start while `[app] start_menu = 1`, the default; checkbox in Settings ->
 Look and window removes it). A moved or rebuilt exe at another path rewrites the link on next start.
+
+**Start menu shortcut target (2026-11-13)**: the `.lnk` points at a private copy, `%LOCALAPPDATA%\Programs\mic thingy\mic-thingy.exe`,
+so moving or deleting a build folder does not break it. Any `mic-thingy.exe` started later refreshes that copy when it is newer
+(a copy that is running is renamed to `.old` first). Turning the setting off removes only the shortcut, not the copy.
