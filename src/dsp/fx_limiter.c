@@ -24,6 +24,8 @@ typedef struct {
     float mn[RING];       /* window minimum of tgt */
     double sum;           /* sum of the last D values of mn */
     float env;            /* smoothed gain */
+    unsigned dq[RING];    /* monotonic queue of target indices (window minimum) */
+    unsigned head, tail;
     int   d;              /* current look-ahead, samples (0..LIMITER_LOOKAHEAD) */
     unsigned idx;
 } LimState;
@@ -54,13 +56,15 @@ static void lim_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
         const float x = buf[i];
         const float a = fabsf(x);
         s->dly[w] = x;
-        s->tgt[w] = a > c ? c / a : 1.0f;
+        const float t = a > c ? c / a : 1.0f;
+        s->tgt[w] = t;
 
-        float m = 1.0f;                           /* min over the last D+1 targets */
-        for (unsigned k = 0; k <= (unsigned)s->d; k++) {
-            const float t = s->tgt[(idx - k) & MASK];
-            if (t < m) m = t;
-        }
+        /* min over the last D+1 targets with a monotonic queue: O(1) per sample instead of O(D) */
+        while (s->tail != s->head && s->tgt[s->dq[(s->tail - 1) & MASK] & MASK] >= t) s->tail--;
+        s->dq[s->tail++ & MASK] = idx;
+        while ((unsigned)(idx - s->dq[s->head & MASK]) > (unsigned)s->d) s->head++;
+        float m = s->tgt[s->dq[s->head & MASK] & MASK];
+        if (m > 1.0f) m = 1.0f;
         s->sum += (double)m - (double)s->mn[(idx - (unsigned)s->d) & MASK];
         s->mn[w] = m;
 
@@ -87,6 +91,7 @@ static void lim_set_param(Fx *fx, int id, float v)
         const int d = (int)(v * 0.001f * s->sr + 0.5f);
         s->d = d > LIMITER_LOOKAHEAD ? LIMITER_LOOKAHEAD : d;
         for (int i = 0; i < RING; i++) { s->tgt[i] = 1.0f; s->mn[i] = 1.0f; s->dly[i] = 0.0f; }
+        s->head = s->tail = 0;
         s->sum = s->d;
         atomic_store_explicit(&fx->latency, s->d, memory_order_relaxed);
     }

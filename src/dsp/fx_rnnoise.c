@@ -5,6 +5,7 @@
 #include "dsp/dsp_util.h"
 #include "rnnoise.h"
 #include "dsp/minphase.h"
+#include "dsp/simd.h"
 
 /* RNNoise works on floats in 16-bit integer range (+-32768), not +-1.0. */
 #define RN_SCALE 32768.0f
@@ -33,7 +34,8 @@ typedef struct {
     int   lowlat;
     VfMinPhase *mp;                     /* design work area (allocated in init) */
     float gains[481];                   /* per-bin gains of the current frame (rnnoise_get_freq_size()) */
-    float h_old[VF_MP_TAPS], h_cur[VF_MP_TAPS];
+    float h_cur[VF_MP_TAPS];            /* designed filter, tap 0 first */
+    float hr_old[VF_MP_TAPS], hr_cur[VF_MP_TAPS];   /* the same, reversed: lets the dot product run forwards */
     float hist[VF_MP_TAPS - 1 + VF_FRAME_SIZE];
 } RnState;
 
@@ -52,7 +54,8 @@ static int rn_init(Fx *fx, int sample_rate)
         free(s->mp); rnnoise_destroy(s->st); free(s); return -1;
     }
     vf_minphase_init(s->mp);
-    s->h_old[0] = s->h_cur[0] = 1.0f;   /* identity until the first frame designs a filter */
+    s->hr_old[VF_MP_TAPS - 1] = s->hr_cur[VF_MP_TAPS - 1] = 1.0f;   /* identity until the first frame designs a filter */
+    (void)vf_simd_avx2();
     s->wet = k_params[RNNOISE_PARAM_WET].def;
     s->dry_delay = RNNOISE_DELAY_SAMPLES;
     fx->state = s;
@@ -67,21 +70,20 @@ static void rn_process_ll(RnState *s, float *buf, int n, FxFrameCtx *ctx)
     ctx->vad_prob = rnnoise_analyze_frame(s->st, s->in, s->gains);
     ctx->vad_valid = 1;
 
-    memcpy(s->h_old, s->h_cur, sizeof s->h_old);
+    memcpy(s->hr_old, s->hr_cur, sizeof s->hr_old);
     vf_minphase_design(s->mp, s->gains, (int)(sizeof s->gains / sizeof s->gains[0]), s->h_cur);
+    for (int k = 0; k < VF_MP_TAPS; k++) s->hr_cur[VF_MP_TAPS - 1 - k] = s->h_cur[k];
 
     const int T = VF_MP_TAPS;
     float *b = s->hist;                         /* [T-1 previous samples][this frame] */
     memcpy(b + T - 1, buf, (size_t)n * sizeof(float));
     const float w = s->wet, d = 1.0f - w;
     for (int i = 0; i < n; i++) {
-        const float *x = b + T - 1 + i;        /* x[-k] = input k samples ago */
-        float yn = 0.0f;
-        for (int k = 0; k < T; k++) yn += s->h_cur[k] * x[-k];
+        const float *x = b + T - 1 + i;        /* x[-k] = input k samples ago; b + i is the oldest sample in reach */
+        const float yn = vf_dot(s->hr_cur, b + i, T);
         float y = yn;
         if (i < LL_XFADE) {
-            float yo = 0.0f;
-            for (int k = 0; k < T; k++) yo += s->h_old[k] * x[-k];
+            const float yo = vf_dot(s->hr_old, b + i, T);
             const float f = (float)(i + 1) / (float)LL_XFADE;
             y = yo + (yn - yo) * f;
         }

@@ -86,3 +86,29 @@ pauses, so they are optimistic - the user listens before a default changes.
 
 Linux (nothing compiled there), echo cancellation in a real room, system-audio mixing with a real application, the
 driver (not built), push-button hotkeys pressed physically.
+
+## Optimisation round (2026-11-13, after the measurements above)
+
+Profile of the default chain (155 us/frame): RNNoise 132 us (85%) - its network 92 us, feature extraction 30 us -,
+limiter 13 us, compressor 7.6, EQ 2.8, high-pass 2.7, gate 1.3. What was done and what it bought (`vf-bench`):
+
+| Change | Where | Effect |
+|---|---|---|
+| int8 network weights only (`DISABLE_DEBUG_FLOAT`) | RNNoise build | network 92 -> 52 us (portable C), exe 8.4 -> 4.3 MB; audio matrix identical (SDR 13.07 dB, pause 23.2 dB) |
+| RNNoise's SSE4.1/AVX2 kernels with run-time CPU dispatch | RNNoise build (`VF_RNNOISE_SIMD`) | network 52 -> 19 us |
+| limiter: monotonic queue instead of a 73-step window minimum per sample | `fx_limiter.c` | 13 -> 2.3 us |
+| AVX2+FMA dot product / axpy with run-time dispatch (`dsp/simd.c`) in the echo canceller | `fx_aec.c` | 640 -> 54 us, same test results (ERLE 68 dB, SDR 7.3 dB) |
+| same kernel in the low-latency FIR | `fx_rnnoise.c` | low-latency mode +57 -> +37 us |
+| spectrum columns precomputed, 10 fps when idle and unfocused | GUI | fewer powf calls and redraws |
+
+| Configuration | before | after |
+|---|---|---|
+| default chain | 155 us (1.55 % of a core) | **72 us (0.72 %)** |
+| default + low-latency mode | 212 us | 109 us |
+| everything on (incl. echo canceller) | 789 us | **151 us** |
+| mic-thingy.exe | 8.0 MB | 4.1 MB |
+
+What is left in the default chain: RNNoise 57 us (feature extraction 30 us - FFT and pitch search in portable C -
+network 19 us, synthesis 6 us), everything else together ~15 us. Further speed-ups would need SIMD versions of the
+feature extraction (upstream has SSE4.1 LPC helpers that are not vendored) or a smaller network; both are tracked as
+ideas, not done. The window itself (~91 MB, 3-5 % of a core while visible) is the graphics driver, not the audio path.

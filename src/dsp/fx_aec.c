@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "dsp/dsp_util.h"
+#include "dsp/simd.h"
 
 static const FxParamInfo k_params[] = {
     { "delay",    "ms", 0.0f,  200.0f, 40.0f, 0 },
@@ -16,7 +17,7 @@ static const FxParamInfo k_params[] = {
 
 typedef struct {
     VfSink *ref;
-    float w[AEC_TAPS];
+    float w[AEC_TAPS];                  /* w[j] multiplies the reference j samples after the oldest in the window */
     float *xh;                          /* reference history, newest at xh[wi - 1] */
     int wi;
     int delay;                          /* samples */
@@ -37,6 +38,7 @@ static int aec_init(Fx *fx, int sr)
     s->wi = HIST;
     s->delay = (int)(k_params[AEC_DELAY_MS].def * 48.0f);
     s->mu = k_params[AEC_STRENGTH].def;
+    (void)vf_simd_avx2();                /* run the CPU detection off the audio thread */
     fx->state = s;
     return 0;
 }
@@ -72,9 +74,9 @@ static void aec_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
     for (int k = 0; k < AEC_TAPS; k++) { const float v = x[-D - k]; en += (double)v * v; }
 
     for (int i = 0; i < n; i++) {
-        const float *xi = x + i - D;     /* xi[-k] = reference k samples before sample i (after the bulk delay) */
-        float y = 0.0f;
-        for (int k = 0; k < AEC_TAPS; k++) y += s->w[k] * xi[-k];
+        const float *xi = x + i - D;     /* newest reference sample of the filter window */
+        const float *xs = xi - (AEC_TAPS - 1);   /* the weights are stored newest-last so both vectors run forwards */
+        const float y = vf_dot(s->w, xs, AEC_TAPS);
         const float d = buf[i];
         const float e = d - y;
         buf[i] = e;
@@ -97,7 +99,7 @@ static void aec_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
         if (s->frozen_run > 10 * VF_SAMPLE_RATE) { s->conv = 0; s->good_run = 0; s->frozen_run = 0; }   /* the room changed: learn again */
         if (s->hold == 0 && en > 1e-4) {
             const float g = s->mu * e / (float)(en + 1e-3);
-            for (int k = 0; k < AEC_TAPS; k++) s->w[k] += g * xi[-k];
+            vf_axpy(s->w, xs, g, AEC_TAPS);
         }
         /* slide the energy window by one sample */
         const float newest = xi[1], oldest = xi[-(AEC_TAPS - 1)];

@@ -197,11 +197,21 @@ static void spectrum_panel(Rectangle box)
         const float x = r.x + 2 + w * logf(fg[g] / f_lo) / logf(f_hi / f_lo);
         DrawLine((int)x, (int)r.y + 2, (int)x, (int)(r.y + r.height) - 2, Fade(C_TEXT, 0.1f));
     }
-    for (int px = 0; px < w; px++) {
-        const float fa = f_lo * powf(f_hi / f_lo, (float)px / (float)w), fb = f_lo * powf(f_hi / f_lo, (float)(px + 1) / (float)w);
-        int ka = (int)(fa * VF_SPEC_N / VF_SAMPLE_RATE), kb = (int)(fb * VF_SPEC_N / VF_SAMPLE_RATE);
-        if (kb < ka) kb = ka;
-        if (kb >= VF_SPEC_BINS) kb = VF_SPEC_BINS - 1;
+    /* bin range of every pixel column: computed once per panel width, not every frame */
+    static short kat[640], kbt[640];
+    static int table_w;
+    if (table_w != w && w <= 640) {
+        for (int px = 0; px < w; px++) {
+            const float fa = f_lo * powf(f_hi / f_lo, (float)px / (float)w), fb = f_lo * powf(f_hi / f_lo, (float)(px + 1) / (float)w);
+            int a = (int)(fa * VF_SPEC_N / VF_SAMPLE_RATE), b = (int)(fb * VF_SPEC_N / VF_SAMPLE_RATE);
+            if (b < a) b = a;
+            if (b >= VF_SPEC_BINS) b = VF_SPEC_BINS - 1;
+            kat[px] = (short)a; kbt[px] = (short)b;
+        }
+        table_w = w;
+    }
+    for (int px = 0; px < w && px < 640; px++) {
+        const int ka = kat[px], kb = kbt[px];
         float vi = -120.0f, vo = -120.0f;
         for (int k = ka; k <= kb; k++) { if (U.spec.in_db[k] > vi) vi = U.spec.in_db[k]; if (U.spec.out_db[k] > vo) vo = U.spec.out_db[k]; }
         const float hi_ = fminf(1.0f, fmaxf(0.0f, (vi + 90.0f) / 90.0f)), ho_ = fminf(1.0f, fmaxf(0.0f, (vo + 90.0f) / 90.0f));

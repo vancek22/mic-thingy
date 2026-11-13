@@ -256,3 +256,11 @@ test: ERLE > 60 dB, near-end SDR ~7 dB in double talk. Real rooms are untested; 
 
 **Driver**: not built (needs WDK + VM); see `driver/README.md`. **CI**: `.github/workflows/ci.yml` (never run; the Linux
 code has still never been compiled).
+
+**Performance (2026-11-13)**: `vf-bench` prints the CPU cost per effect and per configuration. Default chain 72 us per
+10 ms frame (RNNoise int8 + AVX2 dispatch 57 us); `dsp/simd.[ch]` = AVX2/FMA dot and axpy with `__builtin_cpu_supports`
+dispatch (portable fallback) - use it for any new long filter, store the weights reversed so both vectors run forwards;
+the limiter uses a monotonic queue. RNNoise is built with `DISABLE_DEBUG_FLOAT` (int8 weights) and the upstream x86
+dispatch; if a CPU lacks AVX2 the SSE4.1 / portable kernels are chosen automatically. New modules: `dsp/anc.[ch]`
+(FxLMS skeleton, simulation-tested, not in the voice chain; limits in the header), `app/howl.[ch]` (monitor feedback
+guard, setting `howl_guard`).

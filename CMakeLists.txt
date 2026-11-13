@@ -58,6 +58,7 @@ endif()
 add_library(vfcore STATIC
   src/dsp/biquad.c
   src/dsp/minphase.c
+  src/dsp/simd.c
   src/dsp/fx_highpass.c
   src/dsp/fx_rnnoise.c
   src/dsp/fx_gate.c
