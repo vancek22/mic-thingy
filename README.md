@@ -8,6 +8,14 @@ in the spirit of NVIDIA Broadcast / SteelSeries Sonar, but small, open and hacka
 
 <p align="center"><a href="README.pl.md">Polski</a> · MIT License</p>
 
+<p align="center">
+  <a href="https://github.com/vancek22/mic-thingy/releases/latest/download/mic-thingy-windows-x64.zip"><img src="https://img.shields.io/badge/Download-Windows%20(.exe)-2ea44f?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/vancek22/mic-thingy/releases/latest/download/mic-thingy-linux-x86_64.tar.gz"><img src="https://img.shields.io/badge/Download-Linux%20(x86__64)-2ea44f?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux"></a>
+</p>
+<p align="center"><sub>Windows: unpack the zip and run <code>mic-thingy.exe</code> (SmartScreen: "More info" → "Run anyway", the file is not code-signed).
+Linux: <code>tar xzf mic-thingy-linux-x86_64.tar.gz</code>, then <code>packaging/linux/install.sh</code> adds it to the application menu.
+All versions: <a href="https://github.com/vancek22/mic-thingy/releases">Releases</a>.</sub></p>
+
 ![mic thingy screenshot](assets/screenshot.png)
 
 ## Features

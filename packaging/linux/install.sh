@@ -12,6 +12,7 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 exe="$root/build/mic-thingy"
+[ -x "$root/mic-thingy" ] && exe="$root/mic-thingy"      # unpacked release archive: the binary sits next to packaging/
 autostart=0
 uninstall=0
 

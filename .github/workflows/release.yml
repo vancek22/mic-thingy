@@ -1,0 +1,84 @@
+name: release
+
+# Builds the Windows and Linux packages and attaches them, under fixed file names, to a GitHub release.
+# Runs when a release is published (or by hand for an existing tag), so the README download buttons
+# (releases/latest/download/<fixed name>) always point at the newest version.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to attach the packages to (e.g. v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+      - name: Package
+        run: |
+          mkdir -p dist/mic-thingy
+          cp build/mic-thingy.exe build/mic-thingy-cli.exe dist/mic-thingy/
+          cp README.md README.pl.md LICENSE THIRD_PARTY_NOTICES.md dist/mic-thingy/
+      - name: Zip and upload
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          Compress-Archive -Path dist/mic-thingy -DestinationPath mic-thingy-windows-x64.zip -Force
+          gh release upload "$env:TAG" mic-thingy-windows-x64.zip --clobber --repo "$env:GITHUB_REPOSITORY"
+
+  linux:
+    runs-on: ubuntu-22.04          # older glibc than ubuntu-latest: the binary runs on more distributions
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build libpipewire-0.3-dev libasound2-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+      - name: Package and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          d=dist/mic-thingy-linux-x86_64
+          mkdir -p "$d/assets" "$d/packaging/linux"
+          cp build/mic-thingy build/mic-thingy-cli "$d/"
+          cp assets/logo-256.png "$d/assets/"
+          cp packaging/linux/install.sh packaging/linux/mic-thingy.desktop.in "$d/packaging/linux/"
+          cp README.md README.pl.md LICENSE THIRD_PARTY_NOTICES.md "$d/"
+          tar -C dist -czf mic-thingy-linux-x86_64.tar.gz mic-thingy-linux-x86_64
+          gh release upload "$TAG" mic-thingy-linux-x86_64.tar.gz --clobber --repo "$GITHUB_REPOSITORY"

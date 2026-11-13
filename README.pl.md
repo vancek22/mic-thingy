@@ -4,6 +4,14 @@
 
 [English](README.md) · licencja MIT
 
+<p align="center">
+  <a href="https://github.com/vancek22/mic-thingy/releases/latest/download/mic-thingy-windows-x64.zip"><img src="https://img.shields.io/badge/Pobierz-Windows%20(.exe)-2ea44f?style=for-the-badge&logo=windows&logoColor=white" alt="Pobierz dla Windows"></a>
+  <a href="https://github.com/vancek22/mic-thingy/releases/latest/download/mic-thingy-linux-x86_64.tar.gz"><img src="https://img.shields.io/badge/Pobierz-Linux%20(x86__64)-2ea44f?style=for-the-badge&logo=linux&logoColor=white" alt="Pobierz dla Linuksa"></a>
+</p>
+<p align="center"><sub>Windows: rozpakuj zip i uruchom <code>mic-thingy.exe</code> (SmartScreen: „Więcej informacji" → „Uruchom mimo to", plik nie jest podpisany certyfikatem).
+Linux: <code>tar xzf mic-thingy-linux-x86_64.tar.gz</code>, potem <code>packaging/linux/install.sh</code> dodaje program do menu aplikacji.
+Wszystkie wersje: <a href="https://github.com/vancek22/mic-thingy/releases">Releases</a>.</sub></p>
+
 Filtr mikrofonu w czasie rzeczywistym (C11, Windows 11 + Linux/PipeWire), w stylu NVIDIA Broadcast / SteelSeries Sonar.
 
 ```
