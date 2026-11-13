@@ -48,12 +48,13 @@ if [ "$uninstall" = 1 ]; then
 fi
 
 [ -x "$exe" ] || { echo "binary not found: $exe (build first, or pass --exe PATH)" >&2; exit 1; }
-case "$exe" in *[\"\\\`\$]*) echo "path contains characters not allowed in a .desktop Exec line" >&2; exit 1 ;; esac
+case "$exe" in *[\"\\\`$%]*) echo "path contains characters not allowed in a .desktop Exec line" >&2; exit 1 ;; esac
 
 install_desktop() {  # $1 = destination, $2 = args, $3 = extra lines
     mkdir -p "$(dirname "$1")"
     awk -v exe="$exe" -v args="$2" -v extra="$3" '
-        { gsub(/@EXE@/, exe); gsub(/@ARGS@/, args); gsub(/@EXTRA@/, extra); print }
+        function rep(s, tag, val,   i, out) { out = ""; while ((i = index(s, tag)) > 0) { out = out substr(s, 1, i - 1) val; s = substr(s, i + length(tag)) } return out s }   # literal replace: "&" in a path stays, no re-scan of val
+        { print rep(rep(rep($0, "@EXE@", exe), "@ARGS@", args), "@EXTRA@", extra) }
     ' "$here/mic-thingy.desktop.in" > "$1"
 }
 
