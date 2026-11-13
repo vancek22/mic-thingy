@@ -32,6 +32,9 @@ typedef struct Ui {
     VfRing scope;
     int scope_ready;
     char board_edit[260];
+    char proc_find[VF_APP_NAME];            /* search text of the program picker */
+    int proc_find_on;
+    char proc_name[VF_APP_NAME];            /* program currently picked (by name: the process list changes) */
     int board_edit_on;
     char procs[256][VF_APP_NAME];
     int n_procs, proc_sel, preset_sel;
@@ -523,12 +526,27 @@ static void draw_settings(Rectangle area, VfSession *s, VfSettings *st, VfPreset
     }
     if (st->n_apps == 0) { text(F.ui, tr(S_APPS_NONE), box.x + 14, py, C_DISABLED); py += 26; }
     py = box.y + ph - 98;
-    if (U.n_procs == 0) { text(F.ui, tr(S_APPS_NONE), box.x + 14, py + 4, C_DISABLED); }
+    /* program picker: search box, then < name > over the matching running programs (sorted) */
+    static int hits[256];
+    const int nh = vf_appwatch_filter(U.procs, U.n_procs, U.proc_find, hits, 256);
+    {
+        Rectangle sr = { box.x + 14, py - 32, box.width - 28, 26 };
+        if (GuiTextBox(sr, U.proc_find, (int)sizeof U.proc_find - 1, U.proc_find_on)) U.proc_find_on = !U.proc_find_on;
+        if (!U.proc_find[0] && !U.proc_find_on) text(F.ui, tr(S_APPS_SEARCH), sr.x + 8, sr.y + 5, C_DISABLED);
+    }
+    if (nh == 0) { text(F.ui, tr(S_APPS_NONE), box.x + 14, py + 4, C_DISABLED); U.proc_sel = 0; }
     else {
-        if (U.proc_sel >= U.n_procs) U.proc_sel = 0;
-        if (GuiButton((Rectangle){ box.x + 14, py, 24, 24 }, "<")) U.proc_sel = (U.proc_sel + U.n_procs - 1) % U.n_procs;
-        if (GuiButton((Rectangle){ box.x + box.width - 38, py, 24, 24 }, ">")) U.proc_sel = (U.proc_sel + 1) % U.n_procs;
-        text(F.lcd, U.procs[U.proc_sel], box.x + 46, py + 5, C_TEXT);
+        /* keep the pick when the list refreshes: find it by name, else fall back to the first hit */
+        int cur = -1;
+        for (int k = 0; k < nh; k++) if (!strcmp(U.procs[hits[k]], U.proc_name)) { cur = k; break; }
+        if (cur < 0) { cur = 0; snprintf(U.proc_name, sizeof U.proc_name, "%s", U.procs[hits[0]]); }
+        if (GuiButton((Rectangle){ box.x + 14, py, 24, 24 }, "<")) cur = (cur + nh - 1) % nh;
+        if (GuiButton((Rectangle){ box.x + box.width - 38, py, 24, 24 }, ">")) cur = (cur + 1) % nh;
+        snprintf(U.proc_name, sizeof U.proc_name, "%s", U.procs[hits[cur]]);
+        U.proc_sel = hits[cur];
+        BeginScissorMode((int)box.x + 44, (int)py, (int)box.width - 88, 24);      /* long names must not run under the buttons */
+        text(F.lcd, U.proc_name, box.x + 46, py + 5, C_TEXT);
+        EndScissorMode();
     }
     py += 30;
     if (n_presets > 0) {

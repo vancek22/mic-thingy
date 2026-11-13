@@ -19,4 +19,8 @@ int vf_appwatch_match(const VfAppRule *rules, int n_rules, char (*running)[VF_AP
  * Linux: /proc/<pid>/comm. Returns the count. */
 int vf_appwatch_list(char (*out)[VF_APP_NAME], int max);
 
+/* Search for the program picker: indices into `list` of the names that contain `needle` (case-insensitive,
+ * blanks around the needle ignored; empty needle = all), sorted alphabetically. At most `max`; returns the count. */
+int vf_appwatch_filter(char (*list)[VF_APP_NAME], int n, const char *needle, int *idx, int max);
+
 #endif

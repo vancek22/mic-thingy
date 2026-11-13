@@ -492,6 +492,17 @@ static void test_automute(void)
 static void test_appwatch(void)
 {
     printf("per-application presets\n");
+    {
+        char names[5][VF_APP_NAME] = { "svchost.exe", "Chrome.exe", "obs64.exe", "discord.exe", "chromedriver.exe" };
+        int idx[8];
+        int n = vf_appwatch_filter(names, 5, "", idx, 8);
+        CHECK(n == 5 && !strcmp(names[idx[0]], "chromedriver.exe") == 0 && !strcmp(names[idx[1]], "chromedriver.exe"),
+              "empty search lists everything sorted (first '%s')", names[idx[0]]);
+        n = vf_appwatch_filter(names, 5, "  CHROME ", idx, 8);
+        CHECK(n == 2 && !strcmp(names[idx[0]], "Chrome.exe") && !strcmp(names[idx[1]], "chromedriver.exe"), "search 'CHROME': %d hits", n);
+        CHECK(vf_appwatch_filter(names, 5, "zzz", idx, 8) == 0, "no hits");
+        CHECK(vf_appwatch_filter(names, 5, "e", idx, 3) == 3, "max respected");
+    }
     VfAppRule rules[3];
     memset(rules, 0, sizeof rules);
     snprintf(rules[0].exe, sizeof rules[0].exe, "Game.EXE");   snprintf(rules[0].preset, sizeof rules[0].preset, "noisy");

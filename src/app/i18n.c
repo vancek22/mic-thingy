@@ -182,6 +182,7 @@ static const char *const k_str[S_COUNT][VF_LANG_COUNT] = {
     [S_N_CAL_APPLIED] = { "Calibration applied", "Zastosowano kalibrację" },
     [S_COMPACT_TITLE] = { "mic thingy", "mic thingy" },
 
+    [S_APPS_SEARCH] = { "search programs...", "szukaj programu..." },
     [S_HK_GRAB] = { "Keep these keys from other apps", "Nie przekazuj tych klawiszy innym" },
     [S_HOWL_GUARD] = { "Lower the monitor on feedback", "Ścisz odsłuch przy sprzężeniu" },
     [S_N_HOWL_FMT] = { "Feedback at %.0f Hz - monitor lowered", "Sprzężenie przy %.0f Hz - ścięto odsłuch" },

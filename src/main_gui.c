@@ -718,7 +718,7 @@ int main(int argc, char **argv)
         vf_tray_set_state(s.running, atomic_load(&s.pipe.bypass_all));
         {
             UiLink L = { &sel_in, &sel_preset, &shown_preset, presets, n_presets, m.vad,
-                         edit_in || edit_out || edit_preset || edit_name || ve_fx >= 0 || U.board_edit_on || U.hk_capture >= 0 };
+                         edit_in || edit_out || edit_preset || edit_name || ve_fx >= 0 || U.board_edit_on || U.proc_find_on || U.hk_capture >= 0 };
             ui_tick(&s, vf_now_s(), g_win_open, &L);
         }
 

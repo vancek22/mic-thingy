@@ -76,3 +76,44 @@ int vf_appwatch_list(char (*out)[VF_APP_NAME], int max)
 #endif
     return n;
 }
+
+static int ci_contains(const char *hay, const char *needle)
+{
+    const size_t nl = strlen(needle);
+    if (nl == 0) return 1;
+    for (; *hay; hay++) {
+        size_t k = 0;
+        while (k < nl && hay[k] && tolower((unsigned char)hay[k]) == tolower((unsigned char)needle[k])) k++;
+        if (k == nl) return 1;
+    }
+    return 0;
+}
+
+static int ci_cmp(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++) {
+        const int d = tolower((unsigned char)*a) - tolower((unsigned char)*b);
+        if (d) return d;
+    }
+    return tolower((unsigned char)*a) - tolower((unsigned char)*b);
+}
+
+int vf_appwatch_filter(char (*list)[VF_APP_NAME], int n, const char *needle, int *idx, int max)
+{
+    char nd[VF_APP_NAME];
+    snprintf(nd, sizeof nd, "%s", needle ? needle : "");
+    char *s = nd;
+    while (*s == ' ') s++;
+    size_t l = strlen(s);
+    while (l > 0 && s[l - 1] == ' ') s[--l] = '\0';
+    int c = 0;
+    for (int i = 0; i < n && c < max; i++)
+        if (ci_contains(list[i], s)) idx[c++] = i;
+    for (int i = 1; i < c; i++) {                       /* insertion sort: at most a few hundred names */
+        const int v = idx[i];
+        int j = i - 1;
+        while (j >= 0 && ci_cmp(list[idx[j]], list[v]) > 0) { idx[j + 1] = idx[j]; j--; }
+        idx[j + 1] = v;
+    }
+    return c;
+}
