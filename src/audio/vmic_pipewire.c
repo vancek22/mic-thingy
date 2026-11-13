@@ -1,5 +1,5 @@
 /* PipeWire virtual microphone: an output stream whose node is announced as
- * Audio/Source/Virtual, so applications list it as a capture device.
+ * Audio/Source (not .../Virtual: that class got no ports and WirePlumber could not link it), so applications list it as a capture device.
  *
  * Threads: PipeWire's RT data thread calls on_process(), which only does a
  * lock-free vf_sink_read(). Setup/teardown happen on the control thread. */
@@ -55,11 +55,12 @@ int vf_vmic_start(VfSink *sink)
 
     struct pw_properties *props = pw_properties_new(
         PW_KEY_MEDIA_TYPE, "Audio",
-        PW_KEY_MEDIA_CLASS, "Audio/Source/Virtual",
+        PW_KEY_MEDIA_CLASS, "Audio/Source",
         PW_KEY_NODE_NAME, VF_VMIC_NODE_NAME,
         PW_KEY_NODE_DESCRIPTION, VF_VMIC_DESCRIPTION,
         PW_KEY_NODE_LATENCY, "480/48000",          /* ask the graph for a 10 ms quantum */
         PW_KEY_NODE_WANT_DRIVER, "true",
+        PW_KEY_NODE_VIRTUAL, "true",
         NULL);
     if (!props) goto fail;
 

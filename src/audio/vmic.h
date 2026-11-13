@@ -1,5 +1,5 @@
 /* Native virtual microphone.
- *  Linux (PipeWire): a pw_stream with media.class Audio/Source/Virtual named
+ *  Linux (PipeWire): a pw_stream with media.class Audio/Source named
  *  "mic thingy microphone" - visible as a microphone in Discord/OBS.
  *  Windows: not available natively; the CLI writes to VB-Cable's "CABLE Input"
  *  instead and apps select "CABLE Output" as their microphone. */

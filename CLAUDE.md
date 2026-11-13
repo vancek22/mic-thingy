@@ -107,7 +107,7 @@ RNNoise has no upstream CMake: built by our own target using the portable (non-x
 3. [done on Windows; Linux written, untested here] Virtual mic. `mic-thingy-cli --vmic [--monitor N]`
    (or interactive mode menu). Windows: duplex mic -> chain -> "CABLE Input"; apps pick "CABLE Output".
    Linux: capture-only engine -> tap -> `VfSink` -> `pw_stream` (`src/audio/vmic_pipewire.c`, media.class
-   Audio/Source/Virtual, node "mic_thingy", node.latency 480/48000); CMake option `VF_PIPEWIRE` (default ON on Linux).
+   Audio/Source + node.virtual (tested on Fedora/PipeWire 1.6: with Audio/Source/Virtual the node had 0 ports), node "mic_thingy", node.latency 480/48000); CMake option `VF_PIPEWIRE` (default ON on Linux).
    Monitor = second playback device fed from a `VfSink`. `VfSink` (`src/audio/sink.c`) bridges two audio clocks:
    lock-free ring, primes to `target` (960), drops/repeats one sample for drift, raises target after an underrun.
    Guard: refuses CABLE Output / our own source (also the old "VoiceFilter" name) as input in vmic modes (feedback loop).
