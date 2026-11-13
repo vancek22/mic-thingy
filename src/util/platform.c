@@ -153,6 +153,61 @@ int vf_autostart_set_named(const char *name, int enable)
     return r == ERROR_SUCCESS ? 0 : -1;
 }
 
+/* ---- Start menu shortcut (Windows search finds programs by their Start menu entries) ---- */
+#define COBJMACROS
+#include <objbase.h>
+#include <shlobj.h>
+
+static int startmenu_lnk(wchar_t *out, size_t n)
+{
+    wchar_t dir[MAX_PATH];
+    if (SHGetFolderPathW(NULL, CSIDL_PROGRAMS, NULL, 0, dir) != S_OK) return -1;
+    return (size_t)swprintf(out, n, L"%ls\\mic thingy.lnk", dir) < n ? 0 : -1;
+}
+
+int vf_startmenu_exists(void)
+{
+    wchar_t p[MAX_PATH + 32];
+    return startmenu_lnk(p, MAX_PATH + 32) == 0 && GetFileAttributesW(p) != INVALID_FILE_ATTRIBUTES;
+}
+
+int vf_startmenu_set(int enable)
+{
+    wchar_t lnk[MAX_PATH + 32], exe[MAX_PATH];
+    if (startmenu_lnk(lnk, MAX_PATH + 32)) return -1;
+    if (!enable) return (DeleteFileW(lnk) || GetLastError() == ERROR_FILE_NOT_FOUND) ? 0 : -1;
+    const DWORD el = GetModuleFileNameW(NULL, exe, MAX_PATH);
+    if (el == 0 || el >= MAX_PATH) return -1;
+
+    const HRESULT ci = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    const int own = SUCCEEDED(ci);                      /* RPC_E_CHANGED_MODE: COM already up in another mode - still usable */
+    int rc = -1;
+    IShellLinkW *sl = NULL;
+    IPersistFile *pf = NULL;
+    if (SUCCEEDED(CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, (void **)&sl)) &&
+        SUCCEEDED(IShellLinkW_QueryInterface(sl, &IID_IPersistFile, (void **)&pf))) {
+        wchar_t cur[MAX_PATH] = L"";
+        if (SUCCEEDED(pf->lpVtbl->Load(pf, lnk, STGM_READ)) &&
+            SUCCEEDED(IShellLinkW_GetPath(sl, cur, MAX_PATH, NULL, 0)) && _wcsicmp(cur, exe) == 0) {
+            rc = 0;                                     /* already there and pointing at this program */
+        } else {
+            wchar_t wd[MAX_PATH];
+            wcscpy(wd, exe);
+            wchar_t *slash = wcsrchr(wd, L'\\');
+            if (slash) *slash = 0;
+            IShellLinkW_SetPath(sl, exe);
+            IShellLinkW_SetWorkingDirectory(sl, wd);
+            IShellLinkW_SetDescription(sl, L"Real-time microphone noise filter");
+            IShellLinkW_SetIconLocation(sl, exe, 0);
+            rc = SUCCEEDED(pf->lpVtbl->Save(pf, lnk, TRUE)) ? 0 : -1;
+        }
+    }
+    if (pf) pf->lpVtbl->Release(pf);
+    if (sl) IShellLinkW_Release(sl);
+    if (own) CoUninitialize();
+    return rc;
+}
+
 /* ======================================================================= POSIX */
 #else
 #include <dirent.h>
@@ -175,6 +230,8 @@ int vf_mkdir_p(const char *path)
 }
 
 void vf_harden_process(void) {}
+int vf_startmenu_set(int enable) { (void)enable; return -1; }   /* Linux: packaging/linux/install.sh */
+int vf_startmenu_exists(void) { return 0; }
 int vf_remove(const char *path) { return remove(path); }
 int vf_replace_file(const char *tmp, const char *dst) { return rename(tmp, dst); }
 

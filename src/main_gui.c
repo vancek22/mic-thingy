@@ -604,6 +604,7 @@ int main(int argc, char **argv)
     U.hk_capture = -1;
     U.app_active_rule = -1;
     U.prev_sel_in = -2;
+    if (st.start_menu) vf_startmenu_set(1);                    /* creates / repairs the Start menu shortcut (no-op elsewhere) */
     sync_hotkeys();
     for (int i = 0; i < VF_BOARD_SLOTS; i++)
         if (st.board_path[i][0] && vf_board_load(&s.board, i, st.board_path[i]) != 0) st.board_path[i][0] = '\0';

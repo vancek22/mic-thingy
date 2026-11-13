@@ -13,6 +13,11 @@ FILE *vf_fopen(const char *path, const char *mode);
 
 /* Call first thing in main(): Windows - drop the current directory from the DLL search path. */
 void vf_harden_process(void);
+
+/* Windows: a "mic thingy" shortcut in the Start menu, so Windows search finds the program. enable=1 creates it (or
+ * repairs one that points elsewhere), 0 removes it; both idempotent. 0 = ok. Elsewhere: -1, does nothing. */
+int vf_startmenu_set(int enable);
+int vf_startmenu_exists(void);
 int   vf_mkdir_p(const char *path);                  /* 0 = exists/created */
 int   vf_remove(const char *path);                   /* 0 = ok */
 int   vf_replace_file(const char *tmp, const char *dst);   /* atomic-ish rename over dst */

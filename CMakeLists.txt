@@ -112,7 +112,7 @@ add_library(vfcore STATIC
 target_include_directories(vfcore PUBLIC src)
 target_link_libraries(vfcore PUBLIC rnnoise miniaudio)
 if(WIN32)
-  target_link_libraries(vfcore PUBLIC winhttp)
+  target_link_libraries(vfcore PUBLIC winhttp ole32 uuid shell32)
 endif()
 
 # Virtual microphone: PipeWire on Linux, stub elsewhere (Windows uses VB-Cable).

@@ -278,3 +278,7 @@ program already owns is simply not swallowed; bare keys (no modifier) are never 
 each release; the tag of the newest GitHub release, e.g. `v1.0.1`, is compared numerically). Only on click: one HTTPS GET of
 `/repos/vancek22/mic-thingy/releases/latest` (Windows WinHTTP, Linux `curl`), reduced to a validated tag; the page opened is
 built from the tag, never taken from the response. 404 = "no release published yet" (state until a release exists).
+
+**Windows search / Start menu**: `vf_startmenu_set()` (platform.c, IShellLink) keeps `%APPDATA%\Microsoft\Windows\Start Menu\Programs\mic thingy.lnk`
+pointing at the running exe (created / repaired at GUI start while `[app] start_menu = 1`, the default; checkbox in Settings ->
+Look and window removes it). A moved or rebuilt exe at another path rewrites the link on next start.

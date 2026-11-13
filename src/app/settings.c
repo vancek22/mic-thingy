@@ -83,6 +83,7 @@ void vf_settings_defaults(VfSettings *s)
     s->overlay_corner = 1;
     s->howl_guard = 1;
     s->hk_grab = 1;
+    s->start_menu = 1;
     s->win_x = s->win_y = s->cwin_x = s->cwin_y = -32000;
     s->board_gain_db = 0.0f; s->sys_gain_db = -6.0f; s->sys_duck_db = -12.0f;
     snprintf(s->hk_mute, sizeof s->hk_mute, "ctrl+alt+m");
@@ -218,6 +219,7 @@ int vf_settings_load(VfSettings *s, Pipeline *p, const char *path)
     }
     s->ptt_enabled = vf_ini_get_int(&ini, "hotkeys", "ptt_enabled", s->ptt_enabled) != 0;
     s->hk_grab = vf_ini_get_int(&ini, "hotkeys", "grab", s->hk_grab) != 0;
+    s->start_menu = vf_ini_get_int(&ini, "app", "start_menu", s->start_menu) != 0;
     s->apps_enabled = vf_ini_get_int(&ini, "apps", "enabled", s->apps_enabled) != 0;
     s->n_apps = 0;
     for (int i = 0; i < VF_MAX_APP_RULES; i++) {
@@ -262,8 +264,8 @@ int vf_settings_save(const VfSettings *s_in, const Pipeline *p, const char *path
                "\n[app]\nlanguage = %s\nstart_processing = %d\nbackground = %d\npreset = %s\n",
             s->input, s->output, s->monitor, mode_name(s->mode), s->bypass,
             s->language, s->start_processing, s->background, s->preset);
-    fprintf(f, "theme = %s\ncompact = %d\noverlay = %d\noverlay_corner = %d\nper_mic_profiles = %d\nauto_mute_lock = %d\nauto_mute_idle_min = %d\nhowl_guard = %d\n",
-            s->theme, s->compact, s->overlay, s->overlay_corner, s->per_mic, s->auto_mute_lock, s->auto_mute_idle_min, s->howl_guard);
+    fprintf(f, "theme = %s\ncompact = %d\noverlay = %d\noverlay_corner = %d\nper_mic_profiles = %d\nauto_mute_lock = %d\nauto_mute_idle_min = %d\nhowl_guard = %d\nstart_menu = %d\n",
+            s->theme, s->compact, s->overlay, s->overlay_corner, s->per_mic, s->auto_mute_lock, s->auto_mute_idle_min, s->howl_guard, s->start_menu);
     fprintf(f, "\n[audio_extra]\nmonitor_gain_db = %.1f\nmonitor_raw = %d\n", (double)s->monitor_gain_db, s->monitor_raw);
     fprintf(f, "\n[window]\nx = %d\ny = %d\ncompact_x = %d\ncompact_y = %d\n", s->win_x, s->win_y, s->cwin_x, s->cwin_y);
     fprintf(f, "\n[mix]\nboard_gain_db = %.1f\nsys_gain_db = %.1f\nsys_duck_db = %.1f\nsys_enabled = %d\nsys_device = %s\n",

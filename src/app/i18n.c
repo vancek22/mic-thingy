@@ -182,6 +182,7 @@ static const char *const k_str[S_COUNT][VF_LANG_COUNT] = {
     [S_N_CAL_APPLIED] = { "Calibration applied", "Zastosowano kalibrację" },
     [S_COMPACT_TITLE] = { "mic thingy", "mic thingy" },
 
+    [S_START_MENU] = { "Show in Windows search / Start menu", "Pokaż w wyszukiwarce Windows / menu Start" },
     [S_UPD_CHECK] = { "Check for updates", "Sprawdź aktualizacje" },
     [S_UPD_CHECKING] = { "checking...", "sprawdzam..." },
     [S_UPD_LATEST_FMT] = { "You have the newest version (%s)", "Masz najnowszą wersję (%s)" },

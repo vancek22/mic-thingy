@@ -464,6 +464,9 @@ static void draw_settings(Rectangle area, VfSession *s, VfSettings *st, VfPreset
     GuiToggleGroup((Rectangle){ box.x + 14, py, 48, 26 }, tr(S_CORNERS), &corner);
     st->overlay_corner = corner & 3;
     GuiEnable();
+    py += 38;
+    int sm = st->start_menu;
+    if (check_row(box, &py, tr(S_START_MENU), &sm, 1)) { st->start_menu = sm; vf_startmenu_set(sm); }
 #else
     text(F.ui, tr(S_OVERLAY_NA), box.x + 14, py, C_DISABLED);
 #endif
