@@ -264,3 +264,12 @@ the limiter uses a monotonic queue. RNNoise is built with `DISABLE_DEBUG_FLOAT` 
 dispatch; if a CPU lacks AVX2 the SSE4.1 / portable kernels are chosen automatically. New modules: `dsp/anc.[ch]`
 (FxLMS skeleton, simulation-tested, not in the voice chain; limits in the header), `app/howl.[ch]` (monitor feedback
 guard, setting `howl_guard`).
+
+**Security round (2026-11-13)**: INI parser is bounded (4096 entries; `\r`, `\n`, `\r\n` end a line), WAV decode capped (30 min /
+100 M samples), preset/profile names never map to Windows device names, settings are written without control characters,
+`vf_harden_process()` drops the current directory from the DLL search path. `fuzz-ini` (tools/fuzz_ini.c, also a ctest with
+30 000 inputs) mutation-fuzzes the INI parser and checks bounds, last-wins lookup and a write/parse round trip; run longer
+with `build\fuzz-ini --iterations 5000000 --seed N`; `-DVF_LIBFUZZER` builds a libFuzzer entry point.
+Hotkeys: `vf_hotkeys_grab()` (Windows, RegisterHotKey on a helper thread) swallows modifier combinations so the focused
+program no longer sees ctrl+alt+m; polling (GetAsyncKeyState) still reads the state (verified). A combination another
+program already owns is simply not swallowed; bare keys (no modifier) are never grabbed so they stay typeable.

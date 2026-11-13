@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
@@ -101,6 +102,68 @@ void vf_hotkey_format(const VfHotkey *hk, char *buf, size_t n)
 static int key_down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
 #else
 static int key_down(int vk) { (void)vk; return 0; }
+#endif
+
+/* ---- grabbing: keep the combination away from the focused application ---- */
+#ifdef _WIN32
+#define GRAB_MAX 16
+#define WM_GRAB_SET (WM_APP + 1)
+
+typedef struct { int n; UINT mod[GRAB_MAX], key[GRAB_MAX]; } GrabSet;
+
+static HANDLE g_grab_ready;
+static DWORD  g_grab_tid;
+
+static DWORD WINAPI grab_thread(LPVOID arg)
+{
+    (void)arg;
+    MSG m;
+    PeekMessage(&m, NULL, WM_USER, WM_USER, PM_NOREMOVE);     /* creates the thread's message queue */
+    g_grab_tid = GetCurrentThreadId();
+    SetEvent(g_grab_ready);
+    int registered = 0;
+    while (GetMessage(&m, NULL, 0, 0) > 0) {
+        if (m.message != WM_GRAB_SET) continue;
+        GrabSet *g = (GrabSet *)m.lParam;
+        for (int i = 0; i < registered; i++) UnregisterHotKey(NULL, i + 1);
+        registered = 0;
+        for (int i = 0; i < g->n; i++)      /* a combination another program owns simply stays unswallowed */
+            if (RegisterHotKey(NULL, registered + 1, g->mod[i] | MOD_NOREPEAT, g->key[i])) registered++;
+        free(g);
+    }
+    return 0;
+}
+
+void vf_hotkeys_grab(const VfHotkey *hks, int n)
+{
+    static int started;
+    if (!started) {
+        g_grab_ready = CreateEventW(NULL, FALSE, FALSE, NULL);
+        HANDLE t = CreateThread(NULL, 0, grab_thread, NULL, 0, NULL);
+        if (!g_grab_ready || !t) return;
+        CloseHandle(t);
+        WaitForSingleObject(g_grab_ready, 2000);
+        started = 1;
+    }
+    GrabSet *g = (GrabSet *)calloc(1, sizeof *g);
+    if (!g) return;
+    for (int i = 0; i < n && g->n < GRAB_MAX; i++) {
+        UINT mod = 0, key = 0;
+        int keys = 0;
+        for (int k = 0; k < hks[i].n; k++) {
+            const int vk = hks[i].vk[k];
+            if (vk == 0x11) mod |= MOD_CONTROL;
+            else if (vk == 0x12) mod |= MOD_ALT;
+            else if (vk == 0x10) mod |= MOD_SHIFT;
+            else if (vk == 0x5B) mod |= MOD_WIN;
+            else { key = (UINT)vk; keys++; }
+        }
+        if (keys == 1 && mod) { g->mod[g->n] = mod; g->key[g->n] = key; g->n++; }   /* bare keys stay typeable */
+    }
+    if (!g_grab_tid || !PostThreadMessage(g_grab_tid, WM_GRAB_SET, 0, (LPARAM)g)) free(g);
+}
+#else
+void vf_hotkeys_grab(const VfHotkey *hks, int n) { (void)hks; (void)n; }
 #endif
 
 int vf_hotkey_down(const VfHotkey *hk)

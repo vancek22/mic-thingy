@@ -77,6 +77,7 @@ static void sync_hotkeys(void)
 {
     for (int i = 0; i < HK_COUNT; i++)
         if (vf_hotkey_parse(hk_text(i), &U.hk[i]) != 0) { U.hk[i].n = 0; snprintf(hk_text(i), 48, "none"); }
+    vf_hotkeys_grab(U.hk, HK_COUNT);
 }
 
 /* ---- meter stream consumers (called for every 10 ms frame) ---- */

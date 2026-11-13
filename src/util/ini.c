@@ -68,13 +68,14 @@ int vf_ini_parse(VfIni *ini, const char *text)
     if ((unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF) p += 3;  /* BOM */
     while (*p) {
         size_t n = 0;
-        while (p[n] && p[n] != '\n') n++;
+        while (p[n] && p[n] != '\n' && p[n] != '\r') n++;      /* \n, \r\n and a lone \r all end a line */
         size_t c = n < sizeof line - 1 ? n : sizeof line - 1;
         memcpy(line, p, c);
         line[c] = '\0';
         parse_line(ini, line, section, sizeof section);
         p += n;
-        if (*p == '\n') p++;
+        if (*p == '\r' && p[1] == '\n') p++;
+        if (*p) p++;
     }
     return 0;
 }
