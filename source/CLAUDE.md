@@ -1,5 +1,10 @@
 # mic thingy
 
+**Repository layout (since 2026-11-13)**: the repository root holds only README.md, README.pl.md, LICENSE, the two release
+programs (`mic-thingy.exe`, `mic-thingy-linux`, committed by `.github/workflows/release.yml` when a release is published) and
+`source/`, which is the old project root: everything below (`CMakeLists.txt`, `src/`, `tools/`, `build/` ...) is relative to
+`source/`. Run cmake and the tools from `source/`; Claude Code sessions should start in `source/` to load this file.
+
 Real-time microphone filter in C11 (Windows 11 WASAPI + Linux PipeWire). Pipeline:
 mic -> high-pass 80 Hz -> RNNoise -> VAD-driven noise gate -> compressor -> 3-band EQ -> limiter -> output.
 Progress: see "Stages" below.
