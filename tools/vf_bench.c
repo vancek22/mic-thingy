@@ -62,6 +62,20 @@ int main(int argc, char **argv)
     printf("%-34s %10s %10s\n", "configuration", "us/frame", "% of core");
     double base = 0;
     const int n = p.count;
+    /* each default effect alone (everything else bypassed): where the time goes */
+    for (int pass = -1; pass < n; pass++) {
+        if (pass >= 0 && p.fx[pass]->default_bypass) continue;
+        for (int i = 0; i < n; i++) pipeline_set_bypass(&p, i, 1);
+        pipeline_set_param(&p, pipeline_find_fx(&p, "rnnoise"), RNNOISE_PARAM_LOWLAT, 0.0f);
+        pipeline_set_param(&p, pipeline_find_fx(&p, "limiter"), LIM_LOOKAHEAD_MS, 1.5f);
+        char name[64] = "(all effects bypassed: meters, mute, bus)";
+        if (pass >= 0) { pipeline_set_bypass(&p, pass, 0); snprintf(name, sizeof name, "only %s", p.fx[pass]->name); }
+        for (int w = 0; w < 100; w++) { float b[VF_FRAME_SIZE]; memcpy(b, in, sizeof b); pipeline_process(&p, b); }
+        double best = 1e30;
+        for (int r = 0; r < repeat; r++) { const double us = run(&p, in, frames); if (us < best) best = us; }
+        printf("%-42s %10.1f %9.2f%%\n", name, best, best / 100.0);
+    }
+    printf("\n");
     for (int cfg = -3; cfg < n; cfg++) {
         /* cfg -3: default, -2: low-latency, -1: everything on, >= 0: that optional effect added */
         for (int i = 0; i < n; i++) pipeline_set_bypass(&p, i, p.fx[i]->default_bypass);

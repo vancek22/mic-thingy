@@ -16,3 +16,10 @@ Model weights: `rnnoise_data-0b50c45` (`src/rnnoise_data.c/.h`), compiled in.
    filters the current frame directly ("low latency" mode, `src/dsp/fx_rnnoise.c`): no 10 ms
    overlap-add delay. Do not mix with `rnnoise_process_frame()` on one state (the synthesis memory
    is not updated).
+
+3. Build configuration (CMakeLists.txt, no source change): `DISABLE_DEBUG_FLOAT` drops the float copies of the
+   network weights, so the int8 weights (the production model) are used: network 92 -> 52 us per frame with the
+   portable C kernels, 18 us with the AVX2 kernels. The x86 run-time dispatch (SSE4.1 / AVX2+FMA, upstream
+   `src/x86/`) is enabled on x86-64 GCC/Clang builds (`VF_RNNOISE_SIMD`); `src/x86/celt_lpc_sse.h` is an empty
+   stub (the SSE LPC helpers are not vendored, the C versions are used). Audio matrix, float vs int8 model:
+   SDR 13.07 / 13.07 dB, pause attenuation 23.19 / 23.16 dB, onset loss -6.58 / -6.55 dB - identical.

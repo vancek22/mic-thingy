@@ -26,10 +26,24 @@ add_library(rnnoise STATIC
   ${RNN}/src/rnnoise_data.c
   ${RNN}/src/rnnoise_tables.c)
 target_include_directories(rnnoise PUBLIC ${RNN}/include PRIVATE ${RNN}/src)
-target_compile_definitions(rnnoise PRIVATE RNNOISE_BUILD)
+target_compile_definitions(rnnoise PRIVATE RNNOISE_BUILD DISABLE_DEBUG_FLOAT)   # int8 weights only: 3-4x faster, 8 MB smaller
 target_compile_options(rnnoise PRIVATE -O3 -w)
 if(UNIX)
   target_link_libraries(rnnoise PUBLIC m)
+endif()
+
+# x86-64: RNNoise's own run-time CPU dispatch (SSE4.1 / AVX2+FMA kernels for the network layers);
+# the portable C path stays as the fallback and is chosen on other CPUs. Opt out: -DVF_RNNOISE_SIMD=OFF.
+option(VF_RNNOISE_SIMD "Use RNNoise's SSE4.1/AVX2 kernels with run-time dispatch (x86-64)" ON)
+if(VF_RNNOISE_SIMD AND CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64|AMD64" AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  target_sources(rnnoise PRIVATE ${RNN}/src/x86/x86cpu.c ${RNN}/src/x86/x86_dnn_map.c
+                                 ${RNN}/src/x86/nnet_sse4_1.c ${RNN}/src/x86/nnet_avx2.c)
+  set_source_files_properties(${RNN}/src/x86/nnet_sse4_1.c PROPERTIES COMPILE_OPTIONS "-msse4.1")
+  set_source_files_properties(${RNN}/src/x86/nnet_avx2.c PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
+  target_compile_definitions(rnnoise PRIVATE RNN_ENABLE_X86_RTCD OPUS_HAVE_RTCD OPUS_X86_MAY_HAVE_SSE4_1
+                             OPUS_X86_MAY_HAVE_AVX2 CPU_INFO_BY_C)
+  target_include_directories(rnnoise PRIVATE ${RNN}/src/x86)
+  message(STATUS "mic thingy: RNNoise SIMD dispatch enabled")
 endif()
 
 # ---------------------------------------------------------------- miniaudio
