@@ -474,8 +474,8 @@ static void draw_settings(Rectangle area, VfSession *s, VfSettings *st, VfPreset
     if (check_row(box, &py, tr(S_PER_MIC), &pm, 1)) st->per_mic = pm;
     int hg = st->howl_guard;
     if (check_row(box, &py, tr(S_HOWL_GUARD), &hg, 1)) st->howl_guard = hg;
-    int al = st->auto_mute_lock;
 #ifdef _WIN32
+    int al = st->auto_mute_lock;
     if (check_row(box, &py, tr(S_AUTOMUTE_LOCK), &al, 1)) { st->auto_mute_lock = al; }
 #endif
     float idle = (float)st->auto_mute_idle_min;

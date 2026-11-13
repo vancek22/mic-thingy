@@ -102,6 +102,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-c") && more && ncmd < MAX_CMDS) cmds[ncmd++] = argv[++i];
         else if (!strcmp(argv[i], "--no-config")) no_config = 1;
         else if (!strcmp(argv[i], "--preset") && more) preset = argv[++i];
+        else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) { usage(); return 0; }
         else { usage(); return 2; }
     }
 

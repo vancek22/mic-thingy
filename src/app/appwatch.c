@@ -65,7 +65,7 @@ int vf_appwatch_list(char (*out)[VF_APP_NAME], int max)
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
         if (!isdigit((unsigned char)e->d_name[0])) continue;
-        char path[64], name[VF_APP_NAME] = "";
+        char path[300], name[VF_APP_NAME] = "";
         snprintf(path, sizeof path, "/proc/%s/comm", e->d_name);
         FILE *f = fopen(path, "r");
         if (!f) continue;
