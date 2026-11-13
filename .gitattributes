@@ -8,3 +8,5 @@
 *.rc.in text
 *.png binary
 *.ico binary
+*.sh   text eol=lf
+*.in   text eol=lf
