@@ -130,6 +130,8 @@ int vf_autostart_get_named(const char *name)
     return r == ERROR_SUCCESS;
 }
 
+static int installed_exe(const wchar_t *self, wchar_t *out, size_t n);      /* stable copy, see the Start menu section */
+
 int vf_autostart_set_named(const char *name, int enable)
 {
     wchar_t wn[256];
@@ -141,6 +143,9 @@ int vf_autostart_set_named(const char *name, int enable)
         wchar_t exe[VF_PATH_MAX], cmd[VF_PATH_MAX + 64];
         DWORD l = GetModuleFileNameW(NULL, exe, VF_PATH_MAX);
         if (l == 0 || l >= VF_PATH_MAX) { RegCloseKey(k); return -1; }
+        wchar_t inst[MAX_PATH];                      /* start the stable copy, so deleting a build folder cannot break autostart */
+        if (l < MAX_PATH && installed_exe(exe, inst, MAX_PATH) == 0 && GetFileAttributesW(inst) != INVALID_FILE_ATTRIBUTES)
+            wcscpy(exe, inst);
         wcscpy(cmd, L"\"");
         wcscat(cmd, exe);
         wcscat(cmd, L"\" --autostart --minimized");     /* = VF_AUTOSTART_ARGS */
@@ -177,6 +182,8 @@ int vf_startmenu_exists(void)
 static int installed_exe(const wchar_t *self, wchar_t *out, size_t n)
 {
     wchar_t base[MAX_PATH], dir[MAX_PATH + 40];
+    const wchar_t *name = wcsrchr(self, L'\\');
+    if (_wcsicmp(name ? name + 1 : self, L"mic-thingy.exe") != 0) return -1;     /* only the GUI is ever copied (not test programs, not the CLI) */
     if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, base) != S_OK) return -1;
     if ((size_t)swprintf(dir, MAX_PATH + 40, L"%ls\\Programs\\mic thingy", base) >= MAX_PATH + 40) return -1;
     if ((size_t)swprintf(out, n, L"%ls\\mic-thingy.exe", dir) >= n) return -1;

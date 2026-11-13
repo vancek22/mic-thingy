@@ -291,3 +291,5 @@ Look and window removes it). A moved or rebuilt exe at another path rewrites the
 **Start menu shortcut target (2026-11-13)**: the `.lnk` points at a private copy, `%LOCALAPPDATA%\Programs\mic thingy\mic-thingy.exe`,
 so moving or deleting a build folder does not break it. Any `mic-thingy.exe` started later refreshes that copy when it is newer
 (a copy that is running is renamed to `.old` first). Turning the setting off removes only the shortcut, not the copy.
+Autostart (Windows `Run` entry) uses the same stable copy: `vf_autostart_set_named` swaps the current exe for the copy (only when the
+running file is called mic-thingy.exe, so tests and the CLI never copy themselves), and the GUI re-writes an existing entry at start.
