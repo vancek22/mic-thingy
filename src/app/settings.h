@@ -35,6 +35,7 @@ typedef struct VfSettings {
     int   win_x, win_y, cwin_x, cwin_y;   /* window positions (normal / compact), -32000 = not stored */
     /* behaviour */
     int   howl_guard;          /* lower the own-voice monitor when feedback is detected */
+    int   hk_grab;             /* swallow modifier hotkeys so the focused program does not receive them */
     int   per_mic;             /* separate effect settings for every microphone */
     int   auto_mute_lock;      /* mute while the screen is locked */
     int   auto_mute_idle_min;  /* mute after this many minutes without speech, 0 = off */

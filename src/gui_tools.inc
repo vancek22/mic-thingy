@@ -77,7 +77,7 @@ static void sync_hotkeys(void)
 {
     for (int i = 0; i < HK_COUNT; i++)
         if (vf_hotkey_parse(hk_text(i), &U.hk[i]) != 0) { U.hk[i].n = 0; snprintf(hk_text(i), 48, "none"); }
-    vf_hotkeys_grab(U.hk, HK_COUNT);
+    vf_hotkeys_grab(U.hk, g_st->hk_grab ? HK_COUNT : 0);
 }
 
 /* ---- meter stream consumers (called for every 10 ms frame) ---- */
@@ -503,6 +503,8 @@ static void draw_settings(Rectangle area, VfSession *s, VfSettings *st, VfPreset
         py += 38;
     }
     text(F.ui, tr(S_HK_NOTE), box.x + 14, py, C_DISABLED);
+    py += 22;
+    { int g = st->hk_grab; if (check_row(box, &py, tr(S_HK_GRAB), &g, 1)) { st->hk_grab = g; sync_hotkeys(); } }
 
     /* --- 4: presets per program --- */
     box = (Rectangle){ area.x, area.y + (ph + 6), pw, ph };

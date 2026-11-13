@@ -82,6 +82,7 @@ void vf_settings_defaults(VfSettings *s)
     snprintf(s->theme, sizeof s->theme, "graphite");
     s->overlay_corner = 1;
     s->howl_guard = 1;
+    s->hk_grab = 1;
     s->win_x = s->win_y = s->cwin_x = s->cwin_y = -32000;
     s->board_gain_db = 0.0f; s->sys_gain_db = -6.0f; s->sys_duck_db = -12.0f;
     snprintf(s->hk_mute, sizeof s->hk_mute, "ctrl+alt+m");
@@ -216,6 +217,7 @@ int vf_settings_load(VfSettings *s, Pipeline *p, const char *path)
         if ((h = vf_ini_get(&ini, "hotkeys", "bypass"))) copy(s->hk_bypass, sizeof s->hk_bypass, h);
     }
     s->ptt_enabled = vf_ini_get_int(&ini, "hotkeys", "ptt_enabled", s->ptt_enabled) != 0;
+    s->hk_grab = vf_ini_get_int(&ini, "hotkeys", "grab", s->hk_grab) != 0;
     s->apps_enabled = vf_ini_get_int(&ini, "apps", "enabled", s->apps_enabled) != 0;
     s->n_apps = 0;
     for (int i = 0; i < VF_MAX_APP_RULES; i++) {
@@ -268,7 +270,7 @@ int vf_settings_save(const VfSettings *s_in, const Pipeline *p, const char *path
             (double)s->board_gain_db, (double)s->sys_gain_db, (double)s->sys_duck_db, s->sys_enabled, s->sys_device);
     fprintf(f, "\n[board]\n");
     for (int i = 0; i < 8; i++) fprintf(f, "slot%d = %s\n", i + 1, s->board_path[i]);
-    fprintf(f, "\n[hotkeys]\nmute = %s\nptt = %s\nptt_enabled = %d\nbypass = %s\n", s->hk_mute, s->hk_ptt, s->ptt_enabled, s->hk_bypass);
+    fprintf(f, "\n[hotkeys]\nmute = %s\nptt = %s\nptt_enabled = %d\ngrab = %d\nbypass = %s\n", s->hk_mute, s->hk_ptt, s->ptt_enabled, s->hk_grab, s->hk_bypass);
     for (int i = 0; i < 8; i++) fprintf(f, "board%d = %s\n", i + 1, s->hk_board[i]);
     fprintf(f, "\n[apps]\nenabled = %d\n", s->apps_enabled);
     for (int i = 0; i < s->n_apps; i++) fprintf(f, "rule%d = %s|%s\n", i + 1, s->apps[i].exe, s->apps[i].preset);
