@@ -1085,16 +1085,24 @@ int main(int argc, char **argv)
             DrawRectangle((int)(34 + cw), (int)sr.y + 6, 8, 14, status[0] ? on_dark(C_RED) : on_dark(C_NEON));
         }
 
-        /* ---- dropdowns last, so their open lists cover the rest ---- */
+        /* ---- dropdowns last, so their open lists cover the rest. Preset first, so an open device list is
+         * drawn over it; while one list is open the other two ignore the mouse (they lie under the list) ---- */
+        GuiUnlock();
+        const int any_open = edit_in || edit_out || edit_preset;
+        if (any_open && !edit_preset) GuiLock();
+        if (GuiDropdownBox(r_preset, list_presets, &sel_preset, edit_preset)) edit_preset = !edit_preset;
         GuiUnlock();
         if (sel_mode != VF_OUT_VMIC) {
             int *target = sel_mode == VF_OUT_HEADPHONES ? &sel_out : &sel_mon;
+            if (any_open && !edit_out) GuiLock();
             if (GuiDropdownBox(r_out, list_out, target, edit_out)) edit_out = !edit_out;
+            GuiUnlock();
         }
+        if (any_open && !edit_in) GuiLock();
         if (s.running && file_buf) GuiDisable();
         if (GuiDropdownBox(r_in, list_in, &sel_in, edit_in)) edit_in = !edit_in;
         GuiEnable();
-        if (GuiDropdownBox(r_preset, list_presets, &sel_preset, edit_preset)) edit_preset = !edit_preset;
+        GuiUnlock();
         if (!edit_preset && sel_preset != shown_preset && sel_preset < n_presets) {
             if (vf_preset_apply(&s.pipe, presets[sel_preset].name) == 0) {
                 snprintf(st.preset, sizeof st.preset, "%s", presets[sel_preset].name);
