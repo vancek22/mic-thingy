@@ -63,7 +63,9 @@ Fedora: `gcc cmake ninja-build pkgconf pipewire-devel libX11-devel libXrandr-dev
 CMake options: `-DVF_GUI=OFF` (no GUI), `-DVF_PIPEWIRE=OFF` (Linux without the virtual microphone).
 All dependencies are vendored in `third_party/` - no downloads during the build.
 
-> The Linux build (PipeWire source, X11 GUI) has not been tested on real hardware yet - reports welcome.
+Linux launcher (application menu / Super-key search, optional start at login): `packaging/linux/install.sh [--autostart]`; remove with `--uninstall`.
+
+> The Linux build (PipeWire source, X11 GUI) has been tested on Fedora (PipeWire 1.6) only - reports welcome.
 
 ## Usage
 

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=mic thingy
+GenericName=Microphone filter
+Comment=Real-time microphone noise filter
+Exec="@EXE@"@ARGS@
+Icon=mic-thingy
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=microphone;mic;noise;filter;rnnoise;
+StartupWMClass=mic-thingy
+@EXTRA@

@@ -50,6 +50,7 @@ sudo apt install build-essential cmake ninja-build pkg-config libpipewire-0.3-de
 Fedora: `gcc cmake ninja-build pkgconf pipewire-devel libX11-devel libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel mesa-libGL-devel`.
 
 Opcje CMake: `-DVF_GUI=OFF` (bez GUI), `-DVF_PIPEWIRE=OFF` (Linux bez wirtualnego mikrofonu).
+Launcher na Linuksie (menu aplikacji / wyszukiwanie klawiszem Super, opcjonalnie start przy logowaniu): `packaging/linux/install.sh [--autostart]`; usunięcie: `--uninstall`.
 
 ## Użycie
 
