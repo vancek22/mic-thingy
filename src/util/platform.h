@@ -10,6 +10,9 @@
 
 /* fopen() taking a UTF-8 path on every platform. */
 FILE *vf_fopen(const char *path, const char *mode);
+
+/* Call first thing in main(): Windows - drop the current directory from the DLL search path. */
+void vf_harden_process(void);
 int   vf_mkdir_p(const char *path);                  /* 0 = exists/created */
 int   vf_remove(const char *path);                   /* 0 = ok */
 int   vf_replace_file(const char *tmp, const char *dst);   /* atomic-ish rename over dst */

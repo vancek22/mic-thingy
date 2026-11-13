@@ -113,6 +113,12 @@ int vf_executable_path(char *out, size_t n)
 
 #define RUN_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 
+void vf_harden_process(void)
+{
+    SetDllDirectoryW(L"");                 /* no DLLs from the current directory */
+    SetSearchPathMode(BASE_SEARCH_PATH_ENABLE_SAFE_SEARCHMODE | BASE_SEARCH_PATH_PERMANENT);
+}
+
 int vf_autostart_get_named(const char *name)
 {
     wchar_t wn[256];
@@ -168,6 +174,7 @@ int vf_mkdir_p(const char *path)
     return 0;
 }
 
+void vf_harden_process(void) {}
 int vf_remove(const char *path) { return remove(path); }
 int vf_replace_file(const char *tmp, const char *dst) { return rename(tmp, dst); }
 

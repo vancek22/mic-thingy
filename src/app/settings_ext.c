@@ -27,7 +27,9 @@ int vf_fx_to_text(const Pipeline *p, char *buf, size_t n)
 
 int vf_preset_export_text(const Pipeline *p, const char *name, char *buf, size_t n)
 {
-    int w = snprintf(buf, n, "; mic thingy preset \"%s\"", name && name[0] ? name : "exported");
+    char safe[64];
+    if (!name || vf_preset_sanitize(name, safe, sizeof safe) != 0) snprintf(safe, sizeof safe, "exported");
+    int w = snprintf(buf, n, "; mic thingy preset \"%s\"", safe);
     if (w < 0 || (size_t)w >= n) return -1;
     const int t = vf_fx_to_text(p, buf + w, n - (size_t)w);
     return t < 0 ? -1 : w + t;
@@ -87,7 +89,7 @@ int vf_profile_save(const Pipeline *p, const char *device)
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
     FILE *f = vf_fopen(tmp, "wb");
     if (!f) return -1;
-    fprintf(f, "; mic thingy profile for the microphone \"%s\"\n", device);
+    fprintf(f, "; mic thingy profile\n");     /* the device name stays out of the file: it could contain a line break */
     vf_fx_write_ini(f, p);
     if (fclose(f) != 0) { vf_remove(tmp); return -1; }
     return vf_replace_file(tmp, path);

@@ -81,6 +81,7 @@ static void usage(void)
 
 int main(int argc, char **argv)
 {
+    vf_harden_process();
     int pre_in = -1, pre_out = -1, pre_mon = -1, period = 0, mode = -1, ncmd = 0, no_config = 0;
     int periods = 0, fixed = 0, pro_audio = 0, lat_report = 0;
     double seconds = 0;

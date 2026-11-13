@@ -236,8 +236,21 @@ int vf_settings_load(VfSettings *s, Pipeline *p, const char *path)
     return 0;
 }
 
-int vf_settings_save(const VfSettings *s, const Pipeline *p, const char *path)
+/* values come from device names / file paths: a line break in one would inject extra keys into the file */
+static void oneline(char *s)
 {
+    for (; *s; s++) if ((unsigned char)*s < 0x20) *s = ' ';
+}
+
+int vf_settings_save(const VfSettings *s_in, const Pipeline *p, const char *path)
+{
+    VfSettings clean = *s_in;
+    const VfSettings *s = &clean;
+    oneline(clean.input); oneline(clean.output); oneline(clean.monitor); oneline(clean.sys_device);
+    oneline(clean.preset); oneline(clean.language); oneline(clean.theme);
+    for (int i = 0; i < 8; i++) { oneline(clean.board_path[i]); oneline(clean.hk_board[i]); }
+    oneline(clean.hk_mute); oneline(clean.hk_ptt); oneline(clean.hk_bypass);
+    for (int i = 0; i < clean.n_apps; i++) { oneline(clean.apps[i].exe); oneline(clean.apps[i].preset); }
     char tmp[VF_PATH_MAX + 8];
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
     FILE *f = vf_fopen(tmp, "wb");
@@ -266,6 +279,18 @@ int vf_settings_save(const VfSettings *s, const Pipeline *p, const char *path)
 
 /* ------------------------------------------------------------ presets */
 
+static int strncasecmp_ascii(const char *a, const char *b, int n)
+{
+    for (int i = 0; i < n; i++) {
+        char x = a[i], y = b[i];
+        if (x >= 'A' && x <= 'Z') x = (char)(x + 32);
+        if (y >= 'A' && y <= 'Z') y = (char)(y + 32);
+        if (x != y) return 1;
+    }
+    return 0;
+}
+static int strcasecmp_ascii(const char *a, const char *b) { return strncasecmp_ascii(a, b, 4) ; }
+
 int vf_preset_sanitize(const char *in, char *out, size_t n)
 {
     size_t o = 0;
@@ -291,6 +316,14 @@ int vf_preset_sanitize(const char *in, char *out, size_t n)
     memmove(out, out + start, o - start);
     o -= start;
     out[o] = '\0';
+    /* Windows device names (CON.ini still opens the console, NUL swallows writes): make them ordinary names */
+    {
+        static const char *const rsv[] = { "con", "prn", "aux", "nul" };
+        int bad = 0;
+        for (int i = 0; i < 4; i++) bad |= o == 3 && !strcasecmp_ascii(out, rsv[i]);
+        if (o == 4 && (!strncasecmp_ascii(out, "com", 3) || !strncasecmp_ascii(out, "lpt", 3)) && out[3] >= '0' && out[3] <= '9') bad = 1;
+        if (bad && o + 1 < n) { memmove(out + 1, out, o + 1); out[0] = '_'; o++; }
+    }
     return o ? 0 : -1;
 }
 

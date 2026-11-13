@@ -30,6 +30,7 @@ static void copy(char *dst, size_t n, const char *src)
 
 static int add(VfIni *ini, const char *sec, const char *key, const char *val)
 {
+    if (ini->count >= 4096) return -1;          /* a hostile 1 MB file must not turn into hundreds of MB */
     if (ini->count == ini->cap) {
         int nc = ini->cap ? ini->cap * 2 : 32;
         VfIniEntry *ne = (VfIniEntry *)realloc(ini->e, (size_t)nc * sizeof *ne);
@@ -116,7 +117,8 @@ int vf_ini_get_int(const VfIni *ini, const char *section, const char *key, int d
     if (!v) return def;
     char *end;
     long r = strtol(v, &end, 10);
-    return end == v ? def : (int)r;
+    if (end == v) return def;
+    return r > 2147483647L ? 2147483647 : r < -2147483647L ? -2147483647 : (int)r;
 }
 
 double vf_ini_get_double(const VfIni *ini, const char *section, const char *key, double def)

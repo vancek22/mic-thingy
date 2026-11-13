@@ -522,6 +522,7 @@ static void window_close(void)
 
 int main(int argc, char **argv)
 {
+    vf_harden_process();
     int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0, demo = 0, tab_arg = 0;
     const char *in_file = NULL, *shot = NULL, *lang_arg = NULL;
     for (int i = 1; i < argc; i++) {

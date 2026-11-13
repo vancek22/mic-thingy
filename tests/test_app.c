@@ -868,10 +868,37 @@ static void test_howl(void)
     CHECK(vf_howl_update(&h, sp.out_db) == 0.0f, "silence");
 }
 
+static void test_hardening(void)
+{
+    char out[64];
+    const char *dev[] = { "CON", "nul", "Com1", "LPT9", "aux" };
+    for (int i = 0; i < 5; i++) {
+        CHECK(vf_preset_sanitize(dev[i], out, sizeof out) == 0 && out[0] == '_', "reserved name '%s' -> '%s'", dev[i], out);
+    }
+    CHECK(vf_preset_sanitize("console", out, sizeof out) == 0 && !strcmp(out, "console"), "ordinary name changed: %s", out);
+    CHECK(vf_preset_sanitize("..\\..\\x/y", out, sizeof out) == 0 && !strpbrk(out, "\\/.:"), "path characters survive: %s", out);
+
+    /* an INI with a huge number of keys must stay bounded */
+    size_t cap = 600000;
+    char *big = (char *)malloc(cap);
+    size_t used = 0;
+    for (int i = 0; used + 16 < cap; i++) used += (size_t)snprintf(big + used, 16, "k%d=1\n", i);
+    big[used] = '\0';
+    VfIni ini;
+    vf_ini_parse(&ini, big);
+    CHECK(ini.count <= 4096, "ini kept %d entries", ini.count);
+    vf_ini_free(&ini);
+    free(big);
+    vf_ini_parse(&ini, "[a]\nn=99999999999999999999\n");
+    CHECK(vf_ini_get_int(&ini, "a", "n", 0) > 0, "int overflow wrapped");
+    vf_ini_free(&ini);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
     set_cfg_dir();
+    test_hardening();
     test_mute_and_bus();
     test_soundboard();
     test_capture_and_taps();

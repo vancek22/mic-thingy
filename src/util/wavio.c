@@ -9,10 +9,15 @@ float *vf_wav_read_mono(const char *path, int rate, long *out_len)
     ma_decoder dec;
     if (ma_decoder_init_file(path, &cfg, &dec) != MA_SUCCESS) return NULL;
 
+    /* refuse decompression bombs: at most 30 minutes of mono audio at the requested rate (<= 1.4 GB at 192 kHz is
+     * still too much, so also cap the sample count) */
+    const size_t max_len = (size_t)(rate > 0 ? rate : 48000) * 1800u < (size_t)100000000u
+                               ? (size_t)(rate > 0 ? rate : 48000) * 1800u : (size_t)100000000u;
     size_t cap = 48000 * 10, len = 0;
     float *buf = (float *)malloc(cap * sizeof *buf);
     while (buf) {
         if (len == cap) {
+            if (cap >= max_len) { free(buf); buf = NULL; break; }
             float *nb = (float *)realloc(buf, cap * 2 * sizeof *buf);
             if (!nb) { free(buf); buf = NULL; break; }
             buf = nb;
