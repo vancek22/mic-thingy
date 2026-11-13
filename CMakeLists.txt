@@ -95,6 +95,7 @@ add_library(vfcore STATIC
   src/app/automute.c
   src/app/appwatch.c
   src/app/howl.c
+  src/app/update.c
   src/app/abtest.c
   src/util/thread.c
   src/util/cmdline.c
@@ -110,6 +111,9 @@ add_library(vfcore STATIC
   src/app/overlay.c)
 target_include_directories(vfcore PUBLIC src)
 target_link_libraries(vfcore PUBLIC rnnoise miniaudio)
+if(WIN32)
+  target_link_libraries(vfcore PUBLIC winhttp)
+endif()
 
 # Virtual microphone: PipeWire on Linux, stub elsewhere (Windows uses VB-Cable).
 option(VF_PIPEWIRE "Build the PipeWire virtual microphone (Linux)" ${UNIX})

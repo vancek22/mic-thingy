@@ -434,6 +434,8 @@ static const char *hk_row_label(int i)
     return i == 0 ? tr(S_HK_MUTE) : i == 1 ? tr(S_HK_PTT) : tr(S_HK_BYPASS);
 }
 
+static VfUpdate g_upd;                              /* "check for updates" state */
+
 static void draw_settings(Rectangle area, VfSession *s, VfSettings *st, VfPresetInfo *presets, int n_presets, int *sel_preset, int tray_ok)
 {
     const float pw = 292, ph = 276;
@@ -602,6 +604,23 @@ static void draw_settings(Rectangle area, VfSession *s, VfSettings *st, VfPreset
     text(F.lcd, "settings:", box.x + 14, py, C_TEXT_DIM);
     py += 20;
     text_fit(F.lcd, cfg, box.x + 14, py, 12, box.width - 28, C_NEON);
+    py += 26;
+    {   /* check for updates: contacts github.com only on click */
+        const int us = vf_update_state(&g_upd);
+        if (GuiButton((Rectangle){ box.x + 14, py, box.width - 28, 26 }, tr(S_UPD_CHECK)) && us != VF_UPD_CHECKING) vf_update_check(&g_upd);
+        py += 32;
+        char ut[96] = "";
+        Color uc = C_TEXT_DIM;
+        if (us == VF_UPD_CHECKING) snprintf(ut, sizeof ut, "%s", tr(S_UPD_CHECKING));
+        else if (us == VF_UPD_UP_TO_DATE) { snprintf(ut, sizeof ut, tr(S_UPD_LATEST_FMT), g_upd.tag); uc = C_NEON; }
+        else if (us == VF_UPD_NEWER) { snprintf(ut, sizeof ut, tr(S_UPD_NEWER_FMT), g_upd.tag); uc = C_AMBER; }
+        else if (us == VF_UPD_NO_RELEASE) snprintf(ut, sizeof ut, "%s", tr(S_UPD_NONE));
+        else if (us == VF_UPD_ERROR) { snprintf(ut, sizeof ut, "%s", tr(S_UPD_ERROR)); uc = C_RED; }
+        else snprintf(ut, sizeof ut, "%s", tr(S_UPD_NOTE));
+        text_fit(F.ui, ut, box.x + 14, py, 13, box.width - 28, us == VF_UPD_IDLE ? C_DISABLED : uc);
+        py += 22;
+        if (us == VF_UPD_NEWER && GuiButton((Rectangle){ box.x + 14, py, box.width - 28, 26 }, tr(S_UPD_OPEN))) vf_update_open_page(&g_upd);
+    }
     (void)sel_preset;
 }
 

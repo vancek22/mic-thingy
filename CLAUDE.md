@@ -273,3 +273,8 @@ with `build\fuzz-ini --iterations 5000000 --seed N`; `-DVF_LIBFUZZER` builds a l
 Hotkeys: `vf_hotkeys_grab()` (Windows, RegisterHotKey on a helper thread) swallows modifier combinations so the focused
 program no longer sees ctrl+alt+m; polling (GetAsyncKeyState) still reads the state (verified). A combination another
 program already owns is simply not swallowed; bare keys (no modifier) are never grabbed so they stay typeable.
+
+**Check for updates** (Settings tab, About panel): `app/update.[ch]`, version in `app/version.h` (`VF_VERSION`, bump it with
+each release; the tag of the newest GitHub release, e.g. `v1.0.1`, is compared numerically). Only on click: one HTTPS GET of
+`/repos/vancek22/mic-thingy/releases/latest` (Windows WinHTTP, Linux `curl`), reduced to a validated tag; the page opened is
+built from the tag, never taken from the response. 404 = "no release published yet" (state until a release exists).

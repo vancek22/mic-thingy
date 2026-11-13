@@ -12,6 +12,7 @@
 #include "app/calibrate.h"
 #include "app/hotkeys.h"
 #include "app/howl.h"
+#include "app/update.h"
 #include "app/recorder.h"
 #include "app/settings.h"
 #include "app/soundboard.h"
@@ -879,6 +880,24 @@ static void test_howl(void)
     CHECK(vf_howl_update(&h, sp.out_db) == 0.0f, "silence");
 }
 
+static void test_update(void)
+{
+    printf("update check helpers\n");
+    CHECK(vf_version_cmp("v1.0.1", "1.0.0") == 1, "1.0.1 > 1.0.0");
+    CHECK(vf_version_cmp("1.0.0", "v1.0.0") == 0, "equal");
+    CHECK(vf_version_cmp("v1.9", "v1.10") == -1, "numeric, not text: 1.9 < 1.10");
+    CHECK(vf_version_cmp("2.0.0-beta", "1.9.9") == 1, "suffix ignored");
+    CHECK(vf_version_cmp("nightly", "1.0.0") == -2, "no digits");
+    char tag[40], url[200];
+    CHECK(vf_update_parse("{\"url\":\"x\",\"tag_name\": \"v1.2.3\",\"name\":\"n\"}", tag, sizeof tag) == 0 && !strcmp(tag, "v1.2.3"), "parse tag '%s'", tag);
+    CHECK(vf_update_parse("{\"message\":\"Not Found\"}", tag, sizeof tag) != 0, "no tag");
+    CHECK(vf_update_parse("{\"tag_name\":\"v1/../../evil\"}", tag, sizeof tag) != 0, "unsafe tag rejected");
+    CHECK(vf_update_parse("{\"tag_name\":\"a b\"}", tag, sizeof tag) != 0, "blank in tag rejected");
+    CHECK(vf_update_parse("{\"tag_name\":\"v1.2.3", tag, sizeof tag) != 0, "unterminated");
+    CHECK(vf_update_page_url("v1.2.3", url, sizeof url) == 0 && !strcmp(url, "https://github.com/vancek22/mic-thingy/releases/tag/v1.2.3"), "page url '%s'", url);
+    CHECK(vf_update_page_url("v1?x=1", url, sizeof url) != 0, "url injection rejected");
+}
+
 static void test_hardening(void)
 {
     char out[64];
@@ -910,6 +929,7 @@ int main(void)
     setvbuf(stdout, NULL, _IONBF, 0);
     set_cfg_dir();
     test_hardening();
+    test_update();
     test_mute_and_bus();
     test_soundboard();
     test_capture_and_taps();

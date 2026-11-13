@@ -21,6 +21,8 @@
 #include "app/calibrate.h"
 #include "app/hotkeys.h"
 #include "app/howl.h"
+#include "app/update.h"
+#include "app/version.h"
 #include "app/i18n.h"
 #include "app/icon_art.h"
 #include "app/overlay.h"
@@ -762,7 +764,7 @@ int main(int argc, char **argv)
                        (Rectangle){ 12, 6, 36, 36 }, (Vector2){ 0, 0 }, 0, WHITE);
         glow_text(F.title, "MIC THINGY", 58, 8, on_dark(C_NEON));
         const float logo_w = MeasureTextEx(F.title, "MIC THINGY", (float)F.title.baseSize, 0).x;
-        text(F.lcd, "v1.0", 66 + logo_w, 12, on_dark(C_TEXT_DIM));
+        text(F.lcd, "v" VF_VERSION, 66 + logo_w, 12, on_dark(C_TEXT_DIM));
         text(F.ui, tr(S_SUBTITLE), 66 + logo_w, 26, on_dark(C_TEXT));
         {   /* blinking "power" LED */
             const int on = s.running && ((int)(vf_now_s() * 2) % 2 || !atomic_load(&s.pipe.bypass_all));
