@@ -28,7 +28,7 @@ Linux: źródło PipeWire „mic thingy microphone”) albo wirtualny mikrofon +
   programów, kopiowanie i wklejanie presetów, małe okno zawsze na wierzchu, wskaźnik mikrofonu w grze (Windows),
   trzy motywy kolorów.
 - **Mały w tle**: w trayu okno i kontekst OpenGL są niszczone - ok. 1-3 MB prywatnej pamięci przy działającym
-  filtrze (otwarte okno to ok. 70 MB, głównie sterownik grafiki).
+  filtrze (otwarte okno to ok. 90 MB, głównie sterownik grafiki).
 
 ## Budowanie
 

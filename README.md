@@ -34,7 +34,7 @@ in the spirit of NVIDIA Broadcast / SteelSeries Sonar, but small, open and hacka
   undo/redo and hold-to-compare, per-microphone settings, presets per running program, preset copy/paste/drop,
   compact always-on-top window, in-game microphone indicator (Windows), three colour themes.
 - **Small when hidden**: in the tray the window and its OpenGL context are destroyed - about 1-3 MB of private
-  memory with the filter running (the open window needs ~70 MB, mostly the graphics driver).
+  memory with the filter running (the open window needs ~90 MB, mostly the graphics driver).
 - **Console version** (`mic-thingy-cli`) with live parameter commands, and offline test tools.
 - Real-time safe audio path: no allocation, locks or I/O in the callback; parameters via atomics, meters via a
   lock-free ring buffer.
