@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo-256.png" width="140" alt="logo mic thingy"></p>
+<p align="center"><img src="source/assets/logo-256.png" width="140" alt="logo mic thingy"></p>
 
 # mic thingy
 
@@ -10,7 +10,8 @@
 </p>
 <p align="center"><sub>Windows: rozpakuj zip i uruchom <code>mic-thingy.exe</code> (SmartScreen: „Więcej informacji" → „Uruchom mimo to", plik nie jest podpisany certyfikatem).
 Linux: <code>tar xzf mic-thingy-linux-x86_64.tar.gz</code>, potem <code>packaging/linux/install.sh</code> dodaje program do menu aplikacji.
-Wszystkie wersje: <a href="https://github.com/vancek22/mic-thingy/releases">Releases</a>.</sub></p>
+Wszystkie wersje: <a href="https://github.com/vancek22/mic-thingy/releases">Releases</a>.<br>
+<b>Code → Download ZIP</b> zawiera ten README, <code>mic-thingy.exe</code> (Windows), <code>mic-thingy-linux</code> (Linux, w razie potrzeby <code>chmod +x</code>) i folder <code>source/</code> z całą resztą.</sub></p>
 
 Filtr mikrofonu w czasie rzeczywistym (C11, Windows 11 + Linux/PipeWire), w stylu NVIDIA Broadcast / SteelSeries Sonar.
 
@@ -43,6 +44,7 @@ Linux: źródło PipeWire „mic thingy microphone”) albo wirtualny mikrofon +
 Windows (MinGW-w64 GCC, CMake, Ninja — `winget install BrechtSanders.WinLibs.POSIX.UCRT Kitware.CMake Ninja-build.Ninja`):
 
 ```
+cd source
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
@@ -62,7 +64,7 @@ Launcher na Linuksie (menu aplikacji / wyszukiwanie klawiszem Super, opcjonalnie
 
 ## Użycie
 
-- `build/mic-thingy` — GUI (domyślnie po angielsku, przełącznik EN/PL w prawym górnym rogu): urządzenia,
+- `source/build/mic-thingy` — GUI (domyślnie po angielsku, przełącznik EN/PL w prawym górnym rogu): urządzenia,
   tryb wyjścia, suwaki efektów, wskaźniki, presety, autostart.
   Ustawienia zapisują się same (`%APPDATA%\mic thingy\settings.ini`, `~/.config/mic-thingy/settings.ini`),
   presety użytkownika w podkatalogu `presets/`. Wartość każdego suwaka można kliknąć i wpisać dokładnie (Enter),
@@ -73,7 +75,7 @@ Launcher na Linuksie (menu aplikacji / wyszukiwanie klawiszem Super, opcjonalnie
   filtr działa dalej, dopóki nie wybierzesz „Zakończ mic thingy” z menu ikony (prawy przycisk). Kliknięcie ikony
   lub ponowne uruchomienie programu pokazuje okno. Po odłączeniu urządzenia program sam próbuje je ponownie otworzyć.
   Na Linuksie nie ma ikony w zasobniku — okno zamiast tego się minimalizuje.
-- `build/mic-thingy-cli` — wersja konsolowa (`--help`): `--vmic`, `--monitor N`, `--preset NAZWA`,
+- `source/build/mic-thingy-cli` — wersja konsolowa (`--help`): `--vmic`, `--monitor N`, `--preset NAZWA`,
   klawisze `b` (bypass), `1..6` (efekty), `:` (komendy `show`, `set comp ratio 4`, `bypass gate`, `reset`).
 - Narzędzia testowe: `mic-thingy-file` (przetwarzanie pliku), `vf-eval` (pomiary), `vf-latency`, `vf-record`
   — opis w `CLAUDE.md`.
@@ -93,11 +95,11 @@ filtry (11,5 ms) i bufor ramek (ok. 5 ms), więc cała jego część to ok. 37 m
 - Panel VB-Cable (`VBCABLE_ControlPanel.exe` w folderze instalacji) ma ustawienie opóźnienia / bufora.
   Mniejszy bufor zmniejsza opóźnienie kabla, ale na obciążonym komputerze może trzeszczeć – zmieniaj
   po jednym kroku i słuchaj. mic thingy nie zmieni tego ustawienia za Ciebie.
-- Efekt zmierzysz `build\vf-latency` (gra krótkie piski do „CABLE Input” – usłyszy je każda aplikacja
+- Efekt zmierzysz `source\build\vf-latency` (gra krótkie piski do „CABLE Input” – usłyszy je każda aplikacja
   nasłuchująca „CABLE Output”, np. Discord).
 
 ## Licencja
 
 mic thingy jest otwartym oprogramowaniem na licencji [MIT](LICENSE) - można go używać, zmieniać i rozpowszechniać,
 zachowując informację o autorach. Dołączone biblioteki (miniaudio, RNNoise, raylib, GLFW, stb, raygui) mają własne,
-liberalne licencje - zob. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Jak pomóc: [CONTRIBUTING.md](CONTRIBUTING.md).
+liberalne licencje - zob. [THIRD_PARTY_NOTICES.md](source/THIRD_PARTY_NOTICES.md). Jak pomóc: [CONTRIBUTING.md](source/CONTRIBUTING.md).

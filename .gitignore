@@ -16,3 +16,7 @@ vf_test_config/
 *.tmp
 .cache/
 vf_test_appdata/
+
+# the release binaries at the repository root are tracked (updated by the release workflow)
+!/mic-thingy.exe
+!/mic-thingy-linux

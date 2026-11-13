@@ -1,8 +1,10 @@
 name: release
 
-# Builds the Windows and Linux packages and attaches them, under fixed file names, to a GitHub release.
-# Runs when a release is published (or by hand for an existing tag), so the README download buttons
-# (releases/latest/download/<fixed name>) always point at the newest version.
+# When a release is published (or by hand for an existing tag):
+#  1. builds the Windows and Linux programs from that tag,
+#  2. attaches them to the release under fixed names (the README buttons use releases/latest/download/<name>),
+#  3. commits the two programs to the repository root (mic-thingy.exe, mic-thingy-linux), so that
+#     "Code -> Download ZIP" contains README + both programs + the source/ folder.
 on:
   release:
     types: [published]
@@ -24,6 +26,7 @@ jobs:
     defaults:
       run:
         shell: msys2 {0}
+        working-directory: source
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,7 +48,7 @@ jobs:
         run: |
           mkdir -p dist/mic-thingy
           cp build/mic-thingy.exe build/mic-thingy-cli.exe dist/mic-thingy/
-          cp README.md README.pl.md LICENSE THIRD_PARTY_NOTICES.md dist/mic-thingy/
+          cp ../README.md ../README.pl.md ../LICENSE THIRD_PARTY_NOTICES.md dist/mic-thingy/
       - name: Zip and upload
         shell: pwsh
         env:
@@ -53,9 +56,16 @@ jobs:
         run: |
           Compress-Archive -Path dist/mic-thingy -DestinationPath mic-thingy-windows-x64.zip -Force
           gh release upload "$env:TAG" mic-thingy-windows-x64.zip --clobber --repo "$env:GITHUB_REPOSITORY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: root-exe
+          path: source/build/mic-thingy.exe
 
   linux:
     runs-on: ubuntu-22.04          # older glibc than ubuntu-latest: the binary runs on more distributions
+    defaults:
+      run:
+        working-directory: source
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,6 +89,40 @@ jobs:
           cp build/mic-thingy build/mic-thingy-cli "$d/"
           cp assets/logo-256.png "$d/assets/"
           cp packaging/linux/install.sh packaging/linux/mic-thingy.desktop.in "$d/packaging/linux/"
-          cp README.md README.pl.md LICENSE THIRD_PARTY_NOTICES.md "$d/"
+          cp ../README.md ../README.pl.md ../LICENSE THIRD_PARTY_NOTICES.md "$d/"
           tar -C dist -czf mic-thingy-linux-x86_64.tar.gz mic-thingy-linux-x86_64
           gh release upload "$TAG" mic-thingy-linux-x86_64.tar.gz --clobber --repo "$GITHUB_REPOSITORY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: root-linux
+          path: source/build/mic-thingy
+
+  root-binaries:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          name: root-exe
+          path: dl-exe
+      - uses: actions/download-artifact@v4
+        with:
+          name: root-linux
+          path: dl-linux
+      - name: Commit the programs to the repository root
+        run: |
+          cp dl-exe/mic-thingy.exe ./mic-thingy.exe
+          cp dl-linux/mic-thingy ./mic-thingy-linux
+          chmod +x mic-thingy-linux
+          rm -rf dl-exe dl-linux
+          git config user.name "mic thingy dev"
+          git config user.email "mic-thingy@users.noreply.github.com"
+          git add mic-thingy.exe mic-thingy-linux
+          git update-index --chmod=+x mic-thingy-linux
+          if git diff --cached --quiet; then echo "binaries unchanged"; exit 0; fi
+          git commit -m "Release binaries for $TAG (mic-thingy.exe, mic-thingy-linux)"
+          git pull --rebase origin main
+          git push origin HEAD:main

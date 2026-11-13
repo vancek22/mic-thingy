@@ -4,6 +4,9 @@ on:
   push:
     branches: [main, master]
     tags: ["v*"]
+    paths-ignore:
+      - "mic-thingy.exe"
+      - "mic-thingy-linux"
   pull_request:
 
 jobs:
@@ -12,6 +15,7 @@ jobs:
     defaults:
       run:
         shell: msys2 {0}
+        working-directory: source
     steps:
       - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
@@ -32,14 +36,17 @@ jobs:
         run: |
           mkdir -p dist/mic-thingy
           cp build/mic-thingy.exe build/mic-thingy-cli.exe build/mic-thingy-file.exe dist/mic-thingy/
-          cp README.md README.pl.md LICENSE THIRD_PARTY_NOTICES.md dist/mic-thingy/
+          cp ../README.md ../README.pl.md ../LICENSE THIRD_PARTY_NOTICES.md dist/mic-thingy/
       - uses: actions/upload-artifact@v4
         with:
           name: mic-thingy-windows
-          path: dist/mic-thingy
+          path: source/dist/mic-thingy
 
   linux:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
     steps:
       - uses: actions/checkout@v4
       - name: Install build dependencies
@@ -57,9 +64,9 @@ jobs:
         run: |
           mkdir -p dist/mic-thingy
           cp build/mic-thingy build/mic-thingy-cli build/mic-thingy-file dist/mic-thingy/
-          cp README.md README.pl.md LICENSE THIRD_PARTY_NOTICES.md dist/mic-thingy/
+          cp ../README.md ../README.pl.md ../LICENSE THIRD_PARTY_NOTICES.md dist/mic-thingy/
           tar -C dist -czf mic-thingy-linux.tar.gz mic-thingy
       - uses: actions/upload-artifact@v4
         with:
           name: mic-thingy-linux
-          path: mic-thingy-linux.tar.gz
+          path: source/mic-thingy-linux.tar.gz

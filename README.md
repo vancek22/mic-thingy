@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo-256.png" width="160" alt="mic thingy logo"></p>
+<p align="center"><img src="source/assets/logo-256.png" width="160" alt="mic thingy logo"></p>
 
 <h1 align="center">mic thingy</h1>
 
@@ -14,9 +14,10 @@ in the spirit of NVIDIA Broadcast / SteelSeries Sonar, but small, open and hacka
 </p>
 <p align="center"><sub>Windows: unpack the zip and run <code>mic-thingy.exe</code> (SmartScreen: "More info" → "Run anyway", the file is not code-signed).
 Linux: <code>tar xzf mic-thingy-linux-x86_64.tar.gz</code>, then <code>packaging/linux/install.sh</code> adds it to the application menu.
-All versions: <a href="https://github.com/vancek22/mic-thingy/releases">Releases</a>.</sub></p>
+All versions: <a href="https://github.com/vancek22/mic-thingy/releases">Releases</a>.<br>
+<b>Code → Download ZIP</b> contains this README, <code>mic-thingy.exe</code> (Windows), <code>mic-thingy-linux</code> (Linux, <code>chmod +x</code> if needed) and the folder <code>source/</code> with everything else.</sub></p>
 
-![mic thingy screenshot](assets/screenshot.png)
+![mic thingy screenshot](source/assets/screenshot.png)
 
 ## Features
 
@@ -53,6 +54,7 @@ Windows (MinGW-w64 GCC, CMake, Ninja):
 
 ```
 winget install BrechtSanders.WinLibs.POSIX.UCRT Kitware.CMake Ninja-build.Ninja
+cd source
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
@@ -63,6 +65,7 @@ Linux (Debian / Ubuntu):
 ```
 sudo apt install build-essential cmake ninja-build pkg-config libpipewire-0.3-dev \
      libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+cd source
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build && ctest --test-dir build
 ```
 
@@ -77,19 +80,19 @@ Linux launcher (application menu / Super-key search, optional start at login): `
 
 ## Usage
 
-- `build/mic-thingy` - the GUI. Pick your microphone and an output mode, switch **Audio: ON**.
+- `source/build/mic-thingy` - the GUI. Pick your microphone and an output mode, switch **Audio: ON**.
   For the virtual mic select "CABLE Output" (Windows) or "mic thingy microphone" (Linux) in Discord / OBS / Zoom.
   Settings live in `%APPDATA%\mic thingy\settings.ini` or `~/.config/mic-thingy/settings.ini`.
-- `build/mic-thingy-cli --help` - console version: `--vmic`, `--monitor N`, `--preset NAME`;
+- `source/build/mic-thingy-cli --help` - console version: `--vmic`, `--monitor N`, `--preset NAME`;
   keys `b` (bypass), `1..6` (toggle effects), `:` for commands such as `set comp ratio 4`.
 - Developer tools: `mic-thingy-file` (process a WAV through the chain), `vf-eval` (objective metrics),
-  `vf-latency` (round-trip measurement through VB-Cable), `vf-record`, `make_icon` - see [CLAUDE.md](CLAUDE.md).
+  `vf-latency` (round-trip measurement through VB-Cable), `vf-record`, `make_icon` - see [CLAUDE.md](source/CLAUDE.md).
 
 ## Latency
 
 The DSP chain adds about 11.5 ms (RNNoise 10 ms with our look-ahead patch, limiter 1.5 ms).
 End to end through WASAPI shared mode and VB-Cable it is typically 50-100 ms; the cable and the
-Windows audio buffers dominate. Measurements and the reasoning behind every default are in [CLAUDE.md](CLAUDE.md).
+Windows audio buffers dominate. Measurements and the reasoning behind every default are in [CLAUDE.md](source/CLAUDE.md).
 
 On one test machine a VB-Cable loop measured ~75 ms: ~21 ms for the device buffers on mic thingy's side
 and 50-55 ms for the cable plus the Windows audio engine. In real use mic thingy also adds the DSP
@@ -99,15 +102,15 @@ and 50-55 ms for the cable plus the Windows audio engine. In real use mic thingy
 - VB-Cable's own control panel (`VBCABLE_ControlPanel.exe` in its install folder) has a latency /
   buffer setting. A smaller buffer lowers the cable delay but can crackle on a busy system - try a step
   at a time and listen. mic thingy cannot change this setting.
-- Measure the effect with `build\vf-latency` (plays short beeps into "CABLE Input" - anything
+- Measure the effect with `source\build\vf-latency` (plays short beeps into "CABLE Input" - anything
   listening to "CABLE Output", e.g. Discord, hears them).
 
 ## Contributing
 
-Issues and pull requests are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues and pull requests are welcome - see [CONTRIBUTING.md](source/CONTRIBUTING.md).
 
 ## License
 
 mic thingy is released under the [MIT License](LICENSE).
 Bundled libraries (miniaudio, RNNoise, raylib, GLFW, stb, raygui) keep their own permissive licenses -
-see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+see [THIRD_PARTY_NOTICES.md](source/THIRD_PARTY_NOTICES.md).
