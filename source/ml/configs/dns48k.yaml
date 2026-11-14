@@ -1,0 +1,17 @@
+# Full Microsoft DNS Challenge (48 kHz, full-band clean speech): no band limit, optional dereverberation.
+# Folders as produced by the DNS-Challenge download scripts (see README "Full DNS data").
+data:
+  sample_rate: 48000
+  segment_s: 3.0
+  speech_dirs: [data/dns/datasets_fullband/clean_fullband]
+  val_speech_dirs: [data/LibriSpeech/test-clean]
+  noise_dirs: [data/dns/datasets_fullband/noise_fullband]
+  rir_dirs: [data/dns/datasets_fullband/impulse_responses]
+  real_dirs: [data/dns/test_set/real_recordings]
+  speech_max_hz: 0
+  p_rir: 0.5
+  dereverb: true
+  num_workers: 12
+stft: {n_fft: 960, hop: 480, window: vorbis}
+model: {name: crn, channels: [24, 48, 64, 96], rnn_hidden: 384, rnn_layers: 2, mask: complex}
+train: {out_dir: runs/dns48k, steps: 300000, batch: 16, lr: 0.001}

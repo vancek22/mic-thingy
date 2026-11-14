@@ -1,0 +1,15 @@
+# Wideband (16 kHz) CRN: 3x cheaper, matches LibriSpeech/DNS 16 kHz data exactly (no band limit needed).
+data:
+  sample_rate: 16000
+  segment_s: 3.0
+  speech_dirs: [data/LibriSpeech/train-clean-100, data/LibriSpeech/dev-clean]
+  val_speech_dirs: [data/LibriSpeech/test-clean]
+  noise_dirs: [data/RIRS_NOISES/pointsource_noises, data/demand_train]
+  val_noise_dirs: [data/demand_val]
+  rir_dirs: [data/RIRS_NOISES/real_rirs_isotropic_noises, data/RIRS_NOISES/simulated_rirs]
+  real_dirs: [data/real]
+  speech_max_hz: 0
+  num_workers: 8
+stft: {n_fft: 320, hop: 160, window: vorbis}
+model: {name: crn, channels: [16, 32, 48, 64], rnn_hidden: 256, rnn_layers: 2, mask: complex}
+train: {out_dir: runs/crn16k, steps: 60000, batch: 32, lr: 0.001}

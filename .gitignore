@@ -28,3 +28,6 @@ __pycache__/
 *.wav
 *.flac
 vf_test_cfg_app/
+source/ml/data/
+source/ml/runs/
+source/ml/enhanced/
