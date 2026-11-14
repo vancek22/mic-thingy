@@ -33,3 +33,15 @@ Eval 2 (gate on, denoise profile), mean over 0/5/10/20 dB:
 
 RNNoise + gate kills stationary noise in pauses but also chops word onsets (-14..-21 dB); the nn keeps onsets but
 leaves more stationary noise in pauses at step 500.
+
+Eval 3 - real recorded noise, never seen in training (Windows notification sounds `C:\Windows\Media`, a folder of
+game sound effects; local only, not committed), held-out speakers, SNR 0/5/10/20, `evaluate.py --noise-dirs`:
+
+| model | ALL dSDR / pause / lost | Windows sounds | game sfx |
+|---|---|---|---|
+| RNNoise | +0.96 / 5.0 / 7.7 % | -1.00 / 3.0 / 5.8 % | +2.91 / 7.0 / 9.5 % |
+| nn@500 | +1.89 / 7.6 / 2.8 % | -0.49 / 5.8 / 1.8 % | +4.28 / 9.5 / 3.7 % |
+
+Gate onset experiment (2026-11-14): an energy trigger in the gate (open on a level jump 12 dB above a tracked
+background, 60 ms hold) moved pink-noise onsets only -20.9 -> -15.3 dB (white unchanged) and let keyboard clicks
+through (pause 7.7 -> 1.4 dB); reverted. It measures after RNNoise, where onsets are already reduced.

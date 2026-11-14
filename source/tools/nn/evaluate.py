@@ -46,7 +46,38 @@ def speech_track(rng, bank, n, tts=None):
     return clean * (10 ** (rng.uniform(-35, -22) / 20) / L.active_rms(clean))
 
 
+FILE_NOISE = {}            # family -> list of mono 48 kHz arrays (--noise-dirs)
+
+
+def load_noise_dirs(spec):
+    import glob
+    from math import gcd
+    for d in [x for x in spec.split(";") if x.strip()]:
+        clips = []
+        for f in sorted(glob.glob(os.path.join(d, "*.wav")) + glob.glob(os.path.join(d, "*.mp3"))):
+            try:
+                x, sr = sf.read(f, dtype="float32", always_2d=True)
+            except Exception:
+                continue
+            x = x.mean(1)
+            g = gcd(L.SR, sr)
+            x = sig.resample_poly(x, L.SR // g, sr // g).astype(np.float32)
+            if np.abs(x).max() > 1e-4:
+                clips.append(x)
+        if clips:
+            FILE_NOISE["file_" + os.path.basename(os.path.normpath(d)).replace(" ", "_")] = clips
+
+
 def family_noise(rng, fam, n, bank):
+    if fam in FILE_NOISE:
+        y = np.zeros(n, np.float32)
+        pos = int(rng.uniform(0, 0.5) * L.SR)
+        while pos < n:
+            c = FILE_NOISE[fam][int(rng.integers(len(FILE_NOISE[fam])))]
+            m = min(len(c), n - pos)
+            y[pos:pos + m] += c[:m] * rng.uniform(0.3, 1.0)
+            pos += m + int(rng.uniform(0.1, 1.0) * L.SR)
+        return y / (np.sqrt((y ** 2).mean()) + 1e-9)
     if fam == "babble":
         y = L.n_babble(rng, n, bank)
     else:
@@ -59,7 +90,7 @@ def build_set(work, bank, tts):
     items = []
     rng = np.random.default_rng(12345)
     n = 6 * L.SR
-    for fam in FAMILIES:
+    for fam in (list(FILE_NOISE) or FAMILIES):
         for snr in (0, 5, 10, 20):
             for rep in range(2):
                 use_tts = tts is not None and rep == 1
@@ -110,7 +141,11 @@ def main():
     ap.add_argument("--tag", default="run")
     ap.add_argument("--extra", default="")
     ap.add_argument("--configs", default="rnnoise,nn,rnn+nn")
+    ap.add_argument("--noise-dirs", default="", help="';'-separated folders of real noise clips (wav/mp3): "
+                    "replaces the synthetic families (use another --work)")
     a = ap.parse_args()
+    if a.noise_dirs:
+        load_noise_dirs(a.noise_dirs)
     bank = L.SpeechBank(a.bank)
     tts_path = os.path.join(HERE, "..", "..", "build", "audiotest", "speech_pl.wav")
     tts = sf.read(tts_path, dtype="float32")[0] if os.path.exists(tts_path) else None
@@ -150,7 +185,7 @@ def main():
     cfgs = a.configs.split(",")
     print(f"{'family':10s} " + " ".join(f"{c:>26s}" for c in cfgs))
     print(f"{'':10s} " + " ".join(f"{'dSDR  pause  lvl  lost%':>26s}" for _ in cfgs))
-    for fam in FAMILIES + ["ALL"]:
+    for fam in sorted(set(x[2] for x in rows), key=lambda f: (FAMILIES + list(FILE_NOISE)).index(f)) + ["ALL"]:
         line = f"{fam:10s} "
         for c in cfgs:
             r = [x for x in rows if x[0] == c and (fam == "ALL" or x[2] == fam)]

@@ -25,6 +25,9 @@ static const BuiltinPreset k_builtin[] = {
     /* ~1.5 ms DSP delay instead of 11.5: RNNoise gains drive a min-phase FIR, limiter without look-ahead */
     { "lowlat", "Low latency", "Niskie opóźnienie",
       { "set rnnoise lowlat 1", "set limiter lookahead 0", NULL } },
+    /* the project's own neural denoiser instead of RNNoise (tools/nn, docs/NN_LOG.md) */
+    { "ai", "AI denoiser (beta)", "Odszumianie AI (beta)",
+      { "bypass rnnoise on", "bypass nn off", NULL } },
 };
 #define N_BUILTIN ((int)(sizeof k_builtin / sizeof k_builtin[0]))
 
@@ -375,9 +378,15 @@ int vf_preset_apply(Pipeline *p, const char *name)
     if (i >= 0) {
         vf_fx_reset(p);
         for (int k = 0; k_builtin[i].cmds[k]; k++) {
-            /* built-in presets are "set <fx> <param> <value>" lines */
+            /* built-in presets are "set <fx> <param> <value>" and "bypass <fx> on|off" lines */
             char fxn[32], pn[32];
             float v;
+            if (sscanf(k_builtin[i].cmds[k], "bypass %31s %7s", fxn, pn) == 2) {
+                const int fb = pipeline_find_fx(p, fxn);
+                if (fb < 0) return -1;
+                pipeline_set_bypass(p, fb, !strcmp(pn, "on"));
+                continue;
+            }
             if (sscanf(k_builtin[i].cmds[k], "set %31s %31s %f", fxn, pn, &v) != 3) return -1;
             int fi = pipeline_find_fx(p, fxn), pi = pipeline_find_param(p, fi, pn);
             if (fi < 0 || pi < 0) return -1;

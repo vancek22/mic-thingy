@@ -1026,7 +1026,14 @@ int main(int argc, char **argv)
             const bool non = onoff((Rectangle){ box.x + box.width - 128, box.y + 6, 44, 20 }, on, "ON", "OFF");
             GuiSetFont(F.ui);
             GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
-            if (non != on) { pipeline_set_bypass(&s.pipe, i, !non); on = non; }
+            if (non != on) {
+                pipeline_set_bypass(&s.pipe, i, !non);
+                on = non;
+                /* the two denoisers exclude each other: the AI model was never trained on RNNoise output
+                 * (in series both remove speech, docs/NN_LOG.md) */
+                const char *other = !strcmp(fx->name, "nn") ? "rnnoise" : !strcmp(fx->name, "rnnoise") ? "nn" : NULL;
+                if (non && other) { const int o = pipeline_find_fx(&s.pipe, other); if (o >= 0) pipeline_set_bypass(&s.pipe, o, 1); }
+            }
             GuiSetStyle(DEFAULT, TEXT_SIZE, 14);
             GuiSetFont(F.bold);
             if (GuiButton((Rectangle){ box.x + box.width - 80, box.y + 6, 72, 20 }, tr(S_DEFAULTS)))
