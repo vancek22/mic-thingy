@@ -27,3 +27,4 @@ __pycache__/
 *.npy
 *.wav
 *.flac
+vf_test_cfg_app/
