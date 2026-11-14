@@ -38,7 +38,18 @@ class Stft(torch.nn.Module):
         return torch.stft(x, self.n_fft, self.hop, window=self.window, center=False, return_complex=True)
 
     def inverse(self, X: torch.Tensor, length: int) -> torch.Tensor:
-        return torch.istft(X, self.n_fft, self.hop, window=self.window, center=False, length=length)
+        """Windowed overlap-add WITHOUT dividing by the window envelope - exactly what the streaming path
+        (se/stream.py) and the C effect do. torch.istft(center=False) divides by the envelope, which is ~0 in the
+        first and last half frame: with a modified spectrum those samples explode (RMS 2.0 vs 0.01 measured) and
+        dominate every time-domain loss. Interior samples are identical either way (power-complementary window)."""
+        frames = torch.fft.irfft(X.transpose(1, 2), self.n_fft) * self.window          # [B, T, n]
+        T = frames.shape[1]
+        total = (T - 1) * self.hop + self.n_fft
+        y = torch.nn.functional.fold(frames.transpose(1, 2), output_size=(1, total), kernel_size=(1, self.n_fft),
+                                     stride=(1, self.hop))[:, 0, 0]
+        if y.shape[-1] < length:
+            y = torch.nn.functional.pad(y, (0, length - y.shape[-1]))
+        return y[..., :length]
 
     def latency(self) -> int:
         return self.n_fft - self.hop
