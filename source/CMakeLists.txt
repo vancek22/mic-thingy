@@ -61,6 +61,10 @@ add_library(vfcore STATIC
   src/dsp/simd.c
   src/dsp/fx_highpass.c
   src/dsp/fx_rnnoise.c
+  src/dsp/fft960.c
+  src/dsp/nn.c
+  src/dsp/nn_weights.c
+  src/dsp/fx_nn.c
   src/dsp/fx_gate.c
   src/dsp/fx_compressor.c
   src/dsp/fx_eq3.c

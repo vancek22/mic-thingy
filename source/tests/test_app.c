@@ -425,6 +425,76 @@ static void test_calibration(void)
     (void)none;
 }
 
+/* audio-fed calibration: synthetic voice (harmonics + sibilant bursts) in a room with optional mains hum */
+static unsigned g_cal_rng = 7u;
+static float cal_noise(void) { g_cal_rng = g_cal_rng * 1103515245u + 12345u; return (((g_cal_rng >> 16) & 0x7fff) / 16384.0f) - 1.0f; }
+
+static void cal_run_audio(VfCalibrate *c, float f0, float hum_amp, float sib_amp)
+{
+    vf_cal_start(c);
+    static float hp_state = 0;
+    long t = 0;
+    const int total = (VF_CAL_SILENCE_S + VF_CAL_SPEECH_S) * 100;
+    for (int f = 0; f < total; f++) {
+        float b[VF_FRAME_SIZE], peak = 0;
+        const int speech = f >= VF_CAL_SILENCE_S * 100;
+        const int ph = f % 50;                                   /* 500 ms cycle: 30 voiced, 10 sibilant, 10 pause */
+        for (int i = 0; i < VF_FRAME_SIZE; i++, t++) {
+            const double tt = (double)t / SR;
+            float x = 0.0003f * cal_noise() + hum_amp * (float)(sin(2 * PI * 50 * tt) + 0.5 * sin(2 * PI * 150 * tt));
+            if (speech && ph < 30)
+                for (int h = 1; h * f0 < 4000; h++) x += 0.06f / (float)h * (float)sin(2 * PI * f0 * h * tt);
+            if (speech && ph >= 30 && ph < 40) {
+                const float w = cal_noise();
+                x += sib_amp * (w - hp_state);                       /* first difference = crude high-pass */
+                hp_state = w;
+            }
+            b[i] = x;
+            if (fabsf(x) > peak) peak = fabsf(x);
+        }
+        float m[VF_METER_FIELDS] = { 0 };
+        m[VF_M_PEAK_IN] = peak;
+        m[VF_M_VAD] = speech && ph < 40 ? 0.95f : 0.05f;
+        vf_cal_frame(c, m);
+        vf_cal_audio(c, b, VF_FRAME_SIZE);
+    }
+}
+
+static void test_calibration_audio(void)
+{
+    printf("calibration wizard with audio analysis\n");
+    static VfCalibrate c;
+    cal_run_audio(&c, 110.0f, 0.003f, 0.08f);
+    const VfCalResult *r = &c.result;
+    printf("  low voice + hum: f0 %.0f Hz, hum %d Hz (%.0f dB), hp %.0f Hz, sib %.1f dB (%.0f dBFS) -> deess %d thr %.0f,"
+           " balance %.1f/%.1f/%.1f -> eq %.1f/%.1f/%.1f, transient %.1f dB\n",
+           (double)r->f0_hz, r->hum_hz, (double)r->hum_db, (double)r->hp_hz, (double)r->sib_db, (double)r->sib_level_db,
+           r->deess, (double)r->deess_thr_db, (double)r->low_db, (double)r->mid_db, (double)r->high_db,
+           (double)r->eq_low_db, (double)r->eq_mid_db, (double)r->eq_high_db, (double)r->transient_db);
+    CHECK(c.state == VF_CAL_DONE && r->has_audio, "audio analysis ran (state %d %s)", c.state, c.why);
+    CHECK(fabsf(r->f0_hz - 110.0f) < 8.0f, "pitch %.1f Hz", (double)r->f0_hz);
+    CHECK(r->hum_hz == 50, "50 Hz hum detected (%d, %.1f dB)", r->hum_hz, (double)r->hum_db);
+    CHECK(r->hp_hz >= 60.0f && r->hp_hz <= 70.0f, "high-pass below a low voice: %.0f", (double)r->hp_hz);
+    CHECK(r->deess == 1, "strong sibilants -> de-esser (%.1f dB)", (double)r->sib_db);
+    CHECK(r->eq_low_db >= -6.0f && r->eq_low_db <= 6.0f && r->eq_high_db >= -6.0f && r->eq_high_db <= 6.0f, "eq in range");
+
+    pipe_setup();
+    pipeline_start(&g_pipe, SR);
+    vf_cal_apply(&c, &g_pipe);
+    CHECK(atomic_load(&g_pipe.fx[pipeline_find_fx(&g_pipe, "hum")]->bypass) == 0, "hum filter switched on");
+    CHECK(atomic_load(&g_pipe.fx[pipeline_find_fx(&g_pipe, "deesser")]->bypass) == 0, "de-esser switched on");
+    CHECK(fabsf(pipeline_get_param(&g_pipe, pipeline_find_fx(&g_pipe, "highpass"), 0) - r->hp_hz) < 1e-3f, "high-pass applied");
+    pipeline_stop(&g_pipe);
+
+    cal_run_audio(&c, 220.0f, 0.0f, 0.004f);
+    printf("  high voice, clean room: f0 %.0f Hz, hum %d (%.0f dB), hp %.0f Hz, sib %.1f dB -> deess %d, transient %.1f dB\n",
+           (double)r->f0_hz, r->hum_hz, (double)r->hum_db, (double)r->hp_hz, (double)r->sib_db, r->deess, (double)r->transient_db);
+    CHECK(c.state == VF_CAL_DONE && fabsf(r->f0_hz - 220.0f) < 15.0f, "pitch %.1f Hz", (double)r->f0_hz);
+    CHECK(r->hum_hz == 0, "no hum (%d, %.1f dB)", r->hum_hz, (double)r->hum_db);
+    CHECK(r->hp_hz > 110.0f && r->hp_hz <= 140.0f, "high-pass follows a higher voice: %.0f", (double)r->hp_hz);
+    CHECK(r->deess == 0, "soft sibilants -> no de-esser (%.1f dB)", (double)r->sib_db);
+}
+
 static void test_undo(void)
 {
     printf("undo / redo\n");
@@ -937,6 +1007,7 @@ int main(void)
     test_hotkeys();
     test_stats();
     test_calibration();
+    test_calibration_audio();
     test_undo();
     test_automute();
     test_appwatch();

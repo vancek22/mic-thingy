@@ -323,7 +323,7 @@ static void draw_tools(Rectangle area, VfSession *s, VfSettings *st, int sel_mod
     GuiEnable();
     py += 38;
     if (U.cal.state == VF_CAL_IDLE) {
-        text(F.ui, running ? tr(S_CAL_HELP) : tr(S_NEEDS_RUN), box.x + 14, py, C_DISABLED);
+        text_wrap(F.ui, running ? tr(S_CAL_HELP) : tr(S_NEEDS_RUN), box.x + 14, py, box.width - 28, C_DISABLED);
     } else {
         if (U.cal.state == VF_CAL_SILENCE) snprintf(t, sizeof t, tr(S_CAL_SIL_FMT), VF_CAL_SILENCE_S - U.cal.frames / 100);
         else if (U.cal.state == VF_CAL_SPEECH) snprintf(t, sizeof t, tr(S_CAL_SPEECH_FMT), VF_CAL_SPEECH_S - U.cal.frames / 100);
@@ -332,11 +332,23 @@ static void draw_tools(Rectangle area, VfSession *s, VfSettings *st, int sel_mod
         text(F.ui, t, box.x + 14, py, U.cal.state == VF_CAL_FAILED ? C_RED : C_TEXT);
         py += 24;
         led_bar((Rectangle){ box.x + 14, py, box.width - 28, 16 }, vf_cal_progress(&U.cal), C_NEON);
-        py += 30;
+        py += 26;
+        if (U.cal.state == VF_CAL_SILENCE || U.cal.state == VF_CAL_SPEECH)
+            text_wrap(F.ui, tr(S_CAL_READ), box.x + 14, py, box.width - 28, U.cal.state == VF_CAL_SPEECH ? C_NEON : C_DISABLED);
         if (U.cal.state == VF_CAL_DONE) {
-            snprintf(t, sizeof t, tr(S_CAL_PROP_FMT), (double)U.cal.result.gate_threshold, (double)U.cal.result.comp_threshold_db, (double)U.cal.result.comp_makeup_db);
-            text(F.lcd, t, box.x + 14, py, C_NEON);
-            py += 28;
+            const VfCalResult *r = &U.cal.result;
+            snprintf(t, sizeof t, tr(S_CAL_PROP_FMT), (double)r->gate_threshold, (double)r->comp_threshold_db, (double)r->comp_makeup_db);
+            py += text_wrap(F.lcd, t, box.x + 14, py, box.width - 28, C_NEON);
+            if (r->has_audio) {
+                char hum[16];
+                if (r->hum_hz) snprintf(hum, sizeof hum, "%d Hz", r->hum_hz); else snprintf(hum, sizeof hum, "%s", tr(S_CAL_OFF));
+                snprintf(t, sizeof t, tr(S_CAL_PROP2_FMT), (double)r->f0_hz, (double)r->hp_hz, hum);
+                py += text_wrap(F.lcd, t, box.x + 14, py, box.width - 28, C_NEON);
+                snprintf(t, sizeof t, tr(S_CAL_PROP3_FMT), (double)r->eq_low_db, (double)r->eq_mid_db, (double)r->eq_high_db,
+                         tr(r->deess ? S_CAL_ON : S_CAL_OFF));
+                py += text_wrap(F.lcd, t, box.x + 14, py, box.width - 28, C_NEON);
+            }
+            py += 6;
             if (GuiButton((Rectangle){ box.x + 14, py, 120, 28 }, tr(S_CAL_APPLY))) {
                 vf_cal_apply(&U.cal, &s->pipe);
                 note_set("%s", tr(S_N_CAL_APPLIED));
@@ -759,13 +771,15 @@ static void ui_tick(VfSession *s, double now, int running_window, UiLink *L)
 
     /* spectrum feed only while it is visible */
     const int howl_on = st->howl_guard && s->running && s->has_mon && U.scope_ready;
-    const int want_scope = ((running_window && !U.compact && U.tab == 3) || howl_on) && U.scope_ready;
+    const int cal_audio = U.cal.state == VF_CAL_SILENCE || U.cal.state == VF_CAL_SPEECH;
+    const int want_scope = ((running_window && !U.compact && U.tab == 3) || howl_on || cal_audio) && U.scope_ready;
     if (want_scope) {
         if (atomic_load(&s->pipe.scope_ring) != &U.scope) atomic_store(&s->pipe.scope_ring, &U.scope);
         float blk[2 * VF_FRAME_SIZE];
         int got = 0;
-        while (vf_ring_available(&U.scope) >= 2 * VF_FRAME_SIZE && got < 6) {
+        while (vf_ring_available(&U.scope) >= 2 * VF_FRAME_SIZE && got < 16) {
             vf_ring_read(&U.scope, blk, 2 * VF_FRAME_SIZE);
+            if (cal_audio) vf_cal_audio(&U.cal, blk, VF_FRAME_SIZE);
             vf_spec_push(&U.spec, blk, blk + VF_FRAME_SIZE, VF_FRAME_SIZE);
             got++;
         }

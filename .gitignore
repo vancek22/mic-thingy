@@ -20,3 +20,10 @@ vf_test_appdata/
 # the release binaries at the repository root are tracked (updated by the release workflow)
 !/mic-thingy.exe
 !/mic-thingy-linux
+
+# neural denoiser work files (datasets, checkpoints, audio) never go into git
+__pycache__/
+*.pt
+*.npy
+*.wav
+*.flac

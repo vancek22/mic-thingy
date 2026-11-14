@@ -293,3 +293,25 @@ so moving or deleting a build folder does not break it. Any `mic-thingy.exe` sta
 (a copy that is running is renamed to `.old` first). Turning the setting off removes only the shortcut, not the copy.
 Autostart (Windows `Run` entry) uses the same stable copy: `vf_autostart_set_named` swaps the current exe for the copy (only when the
 running file is called mic-thingy.exe, so tests and the CLI never copy themselves), and the GUI re-writes an existing entry at start.
+
+## Auto setup + own neural denoiser (2026-11-14)
+**Calibration = auto setup** (`app/calibrate.[ch]`, Tools tab): 5 s silence, then 15 s reading a displayed text
+(`S_CAL_READ`, EN/PL). Feeds: meter frames (`vf_cal_frame`) + raw mic samples from the scope ring (`vf_cal_audio`,
+the GUI turns the scope ring on while calibrating). Measures noise floor, mains hum (Goertzel 50/60 Hz + harmonics vs
+neighbours, > 15 dB -> hum filter on), noise impulsiveness, pitch (autocorrelation, median), speech spectrum balance
+(noise PSD subtracted) vs LibriSpeech targets `VF_CAL_T_*` (tools/nn/ltas.py), sibilance (p95 5-10 kHz level minus
+median 300-3000 Hz level, > -3 dB -> de-esser on). Proposes high-pass (0.55 x pitch, 60-140 Hz, >= 100 with rumble),
+gate, RNNoise strength (by SNR), compressor, EQ (half-way to the target, only beyond 4 dB, +-6 dB), de-esser threshold.
+Tests: `test_calibration_audio` (synthetic voice + hum + sibilants).
+
+**"nn" effect (AI denoiser, beta, Extra tab, off by default)**: `dsp/fx_nn.c` + `dsp/nn.c` (GRU inference, torch gate
+maths) + `dsp/fft960.c` (mixed radix 2/3/5) + generated `dsp/nn_weights.c`. 960 Vorbis frames, hop 480, 161 bins
+(0-8 kHz) -> gains (above 8 kHz: mean gain of bins 140-160), floor param, overlap-add: delay 480 like RNNoise. Writes
+`ctx->vad_prob` (sits after RNNoise in the chain, so its VAD wins when both run). Parity: `tests/nn_golden.h` (export.py)
+-> test_fx checks features, gains, VAD vs torch (~1e-7) and perfect reconstruction with unity gains.
+Training (`tools/nn/`, CPU torch in a venv, requirements.txt): `prep_speech.py` (LibriSpeech split -> int16 bank),
+`nnlib.py` (noise zoo, augmentation, model), `train.py`, `export.py`, `evaluate.py` (held-out speakers through
+mic-thingy-file, per noise family). Datasets/checkpoints/audio stay out of git. Results and iterations: `docs/NN_LOG.md`.
+GUI pages: Extra = aec, hum, nn, dereverb, breath, guard; Effects = agc, deesser, warmth, voice (6 panels per page max -
+the de-esser had been invisible before).
+Start-menu copy: also refreshed when the size differs (an older-timestamped release zip no longer leaves the old copy).

@@ -26,3 +26,7 @@ Notes
   VB-Audio Software and is not bundled; users install it themselves.
 - The icon and logo (`assets/`) are generated from `src/app/icon_art.c` and are
   part of mic thingy (MIT).
+- The weights of the "AI denoiser" (`src/dsp/nn_weights.c`, mic thingy's own model, MIT) were trained on speech
+  from the LibriSpeech ASR corpus by Vassil Panayotov et al. (https://www.openslr.org/12), licensed under
+  Creative Commons Attribution 4.0 (https://creativecommons.org/licenses/by/4.0/). No LibriSpeech audio is
+  included in this repository or in the programs; the training noise is synthesised by `tools/nn/nnlib.py`.

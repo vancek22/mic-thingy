@@ -84,7 +84,7 @@ void fx_deesser_make(Fx *fx)
     fx->params = k_params;
     fx->n_params = (int)(sizeof k_params / sizeof k_params[0]);
     fx->default_bypass = 1;
-    fx->page = 1;
+    fx->page = 2;
     atomic_init(&fx->latency, 0);
     atomic_init(&fx->bypass, 1);
 }

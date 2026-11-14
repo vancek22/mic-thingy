@@ -188,6 +188,31 @@ static void text(Font f, const char *s, float x, float y, Color c)
     DrawTextEx(f, s, (Vector2){ x, y }, (float)f.baseSize, 0, c);
 }
 
+
+/* Word-wrapped text (breaks only at spaces, so UTF-8 stays intact); returns the height used. */
+static float text_wrap(Font f, const char *s, float x, float y, float maxw, Color c)
+{
+    char line[256], cand[256];
+    float yy = y;
+    const float lh = (float)f.baseSize + 3.0f, fs = (float)f.baseSize;
+    line[0] = 0;
+    while (*s) {
+        while (*s == ' ') s++;
+        const char *e = s;
+        while (*e && *e != ' ') e++;
+        if (e == s) break;
+        snprintf(cand, sizeof cand, "%s%s%.*s", line, line[0] ? " " : "", (int)(e - s), s);
+        if (line[0] && MeasureTextEx(f, cand, fs, 0).x > maxw) {
+            DrawTextEx(f, line, (Vector2){ x, yy }, fs, 0, c);
+            yy += lh;
+            snprintf(line, sizeof line, "%.*s", (int)(e - s), s);
+        } else snprintf(line, sizeof line, "%s", cand);
+        s = e;
+    }
+    if (line[0]) { DrawTextEx(f, line, (Vector2){ x, yy }, fs, 0, c); yy += lh; }
+    return yy - y;
+}
+
 static void glow_text(Font f, const char *s, float x, float y, Color c)
 {
     Color g = c;

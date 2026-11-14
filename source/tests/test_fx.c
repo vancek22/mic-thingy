@@ -466,7 +466,7 @@ static void test_chain_defaults(void)
     pipeline_init(&p);
     chain_build(&c, &p);
     pipeline_start(&p, SR);
-    const char *off[] = { "aec", "hum", "dereverb", "breath", "guard", "agc", "deesser", "warmth", "voice" };
+    const char *off[] = { "aec", "hum", "nn", "dereverb", "breath", "guard", "agc", "deesser", "warmth", "voice" };
     const char *on[] = { "highpass", "rnnoise", "gate", "comp", "eq", "limiter" };
     for (unsigned i = 0; i < sizeof off / sizeof off[0]; i++)
         CHECK(atomic_load(&p.fx[pipeline_find_fx(&p, off[i])]->bypass) == 1, "%s should start off", off[i]);
@@ -495,6 +495,79 @@ static void test_chain_defaults(void)
     pipeline_stop(&p);
 }
 
+/* --- own neural denoiser: FFT vs naive DFT, torch parity (golden data from tools/nn/export.py),
+ *     unity gains reconstruct the input delayed by 480 samples --- */
+#include "dsp/fft960.h"
+#include "dsp/fx_nn.h"
+#include "nn_golden.h"
+
+static float golden_x(long i)
+{
+    const double d = (double)i;
+    return (float)(0.3 * sin(2 * PI * 440 * d / 48000) + 0.1 * sin(2 * PI * 3150 * d / 48000) * ((i % 4800) < 2400)
+                   + 0.02 * ((double)(i * 7919 % 1000) / 1000.0 - 0.5));
+}
+
+static void test_nn(void)
+{
+    printf("neural denoiser (fft, torch parity, reconstruction)\n");
+    static VfFft f;
+    vf_fft_init(&f);
+    static float re[VF_FFT_N], im[VF_FFT_N], x[VF_FFT_N];
+    for (int i = 0; i < VF_FFT_N; i++) { x[i] = noise(); re[i] = x[i]; im[i] = 0; }
+    vf_fft(&f, re, im, 0);
+    double maxerr = 0;
+    for (int k = 0; k < VF_FFT_N; k += 37) {
+        double sr = 0, si = 0;
+        for (int n = 0; n < VF_FFT_N; n++) { sr += x[n] * cos(2 * PI * k * n / VF_FFT_N); si -= x[n] * sin(2 * PI * k * n / VF_FFT_N); }
+        maxerr = fmax(maxerr, fabs(sr - re[k]) + fabs(si - im[k]));
+    }
+    CHECK(maxerr < 1e-3, "fft differs from the DFT by %.2g", maxerr);
+    vf_fft(&f, re, im, 1);
+    maxerr = 0;
+    for (int i = 0; i < VF_FFT_N; i++) maxerr = fmax(maxerr, fabs(re[i] / VF_FFT_N - x[i]));
+    CHECK(maxerr < 1e-5, "inverse fft error %.2g", maxerr);
+
+    /* features: same window, FFT and log as fx_nn.c, on the golden signal (480 zeros first) */
+    static float win[VF_FFT_N], sig_[VF_FRAME_SIZE * (NN_GOLDEN_FRAMES + 1)];
+    for (int i = 0; i < VF_FFT_N; i++) { const double a = sin(PI * (i + 0.5) / VF_FFT_N); win[i] = (float)sin(0.5 * PI * a * a); }
+    for (int i = 0; i < VF_FRAME_SIZE; i++) sig_[i] = 0;
+    for (long i = 0; i < (long)VF_FRAME_SIZE * NN_GOLDEN_FRAMES; i++) sig_[VF_FRAME_SIZE + i] = golden_x(i);
+    double ferr = 0, gerr = 0, verr = 0;
+    static VfNn nn;
+    CHECK(vf_nn_init(&nn, &vf_nn_default) == 0, "weights fit");
+    float feat[VF_NN_NB], g[VF_NN_NB];
+    for (int t = 0; t < NN_GOLDEN_FRAMES; t++) {
+        for (int i = 0; i < VF_FFT_N; i++) { re[i] = sig_[t * VF_FRAME_SIZE + i] * win[i]; im[i] = 0; }
+        vf_fft(&f, re, im, 0);
+        for (int k = 0; k < VF_NN_NB; k++) {
+            feat[k] = log10f((re[k] * re[k] + im[k] * im[k]) / (float)VF_FRAME_SIZE + 1e-10f);
+            ferr = fmax(ferr, fabs(feat[k] - nn_golden_feat[t * VF_NN_NB + k]));
+        }
+        const float v = vf_nn_step(&nn, nn_golden_feat + t * VF_NN_NB, g);
+        for (int k = 0; k < VF_NN_NB; k++) gerr = fmax(gerr, fabs(g[k] - nn_golden_gain[t * VF_NN_NB + k]));
+        verr = fmax(verr, fabs(v - nn_golden_vad[t]));
+    }
+    CHECK(ferr < 2e-3, "features differ from torch by %.2g", ferr);
+    CHECK(gerr < 1e-4 && verr < 1e-4, "inference differs from torch: gains %.2g vad %.2g", gerr, verr);
+    printf("  max diff vs torch: features %.2g, gains %.2g, vad %.2g\n", ferr, gerr, verr);
+
+    /* floor 0 dB = every gain 1: output == input delayed by exactly NN_DELAY_SAMPLES */
+    static Fx fx;
+    fx_nn_make(&fx);
+    CHECK(fx.init(&fx, SR) == 0, "nn init");
+    fx.set_param(&fx, NN_PARAM_FLOOR, 0.0f);
+    static float in[VF_FRAME_SIZE * 40], out[VF_FRAME_SIZE * 40];
+    for (int i = 0; i < VF_FRAME_SIZE * 40; i++) in[i] = out[i] = noise() * 0.5f;
+    FxFrameCtx ctx = { 0 };
+    for (int b = 0; b < 40; b++) fx.process(&fx, out + b * VF_FRAME_SIZE, VF_FRAME_SIZE, &ctx);
+    double rerr = 0;
+    for (int i = NN_DELAY_SAMPLES; i < VF_FRAME_SIZE * 40; i++) rerr = fmax(rerr, fabs(out[i] - in[i - NN_DELAY_SAMPLES]));
+    CHECK(rerr < 1e-5, "unity gains do not reconstruct the delayed input (err %.2g)", rerr);
+    CHECK(ctx.vad_valid == 1 && ctx.vad_prob >= 0 && ctx.vad_prob <= 1, "nn writes the voice probability");
+    fx.destroy(&fx);
+}
+
 int main(void)
 {
     test_chain_defaults();
@@ -508,6 +581,7 @@ int main(void)
     test_breath();
     test_dereverb();
     test_voice();
+    test_nn();
     printf(g_fail ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

@@ -192,7 +192,10 @@ static int installed_exe(const wchar_t *self, wchar_t *out, size_t n)
     WIN32_FILE_ATTRIBUTE_DATA src, dst;
     if (!GetFileAttributesExW(self, GetFileExInfoStandard, &src)) return -1;
     const int have = GetFileAttributesExW(out, GetFileExInfoStandard, &dst) != 0;
-    if (have && CompareFileTime(&src.ftLastWriteTime, &dst.ftLastWriteTime) <= 0) return 0;   /* the copy is current */
+    /* current = same size and not older; a different size (another version, even with an older timestamp, e.g. an
+     * unzipped release) replaces it too */
+    if (have && src.nFileSizeLow == dst.nFileSizeLow && src.nFileSizeHigh == dst.nFileSizeHigh
+        && CompareFileTime(&src.ftLastWriteTime, &dst.ftLastWriteTime) <= 0) return 0;
 
     wchar_t *p = wcschr(dir + 3, L'\\');                                  /* create Programs\mic thingy step by step */
     while (p) { *p = 0; CreateDirectoryW(dir, NULL); *p = L'\\'; p = wcschr(p + 1, L'\\'); }
