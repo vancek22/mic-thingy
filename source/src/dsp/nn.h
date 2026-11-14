@@ -6,11 +6,12 @@
 #ifndef VF_NN_H
 #define VF_NN_H
 
-#define VF_NN_NB   161          /* spectrum bins the net sees and predicts (0..8 kHz at 50 Hz) */
+#define VF_NN_NB   161          /* maximum spectrum bins the net sees and predicts (50 Hz apart); weights say how many */
 #define VF_NN_MAXH 192
 
 typedef struct VfNnWeights {
     int nb, h;
+    int hf_lo, hf_hi;                          /* bins >= nb get the mean gain of bins hf_lo..hf_hi-1 */
     const float *mean, *std;                   /* [nb] */
     const float *in_w, *in_b;                  /* [h][nb], [h] */
     const float *g1_wih, *g1_whh, *g1_bih, *g1_bhh;   /* [3h][h], [3h][h], [3h], [3h] */

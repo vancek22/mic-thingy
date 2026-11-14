@@ -50,7 +50,8 @@ def compute_loss(model, noisy, clean, vad):
     scale = noisy.pow(2).mean(-1, keepdim=True).sqrt() + 1e-4
     Xn = Xraw / scale.unsqueeze(-1)
     Xc = L.stft(clean) / scale.unsqueeze(-1)
-    En = L.apply_gains(Xn, g)
+    En = L.apply_gains(Xn, g)[:, :L.NB]               # scored only where the training speech has content
+    Xc = Xc[:, :L.NB]
     c = 0.3
     e = (En.abs() + 1e-7) ** c
     s = (Xc.abs() + 1e-7) ** c

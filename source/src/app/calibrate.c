@@ -191,7 +191,7 @@ static void analyse_audio(VfCalibrate *c, VfCalResult *r)
     r->eq_mid_db = fabsf(dm) > 4.0f ? clampf(-0.5f * dm, -6.0f, 6.0f) : 0.0f;
     r->eq_high_db = fabsf(dh) > 4.0f ? clampf(-0.5f * dh, -6.0f, 6.0f) : 0.0f;
     /* de-esser: sibilants clearly louder than the vowels' band */
-    r->deess = r->sib_db > -3.0f;
+    r->deess = r->sib_db > 3.0f;              /* a normal voice (TTS) measures about 0 dB */
     r->deess_thr_db = clampf(r->sib_level_db - 6.0f, -50.0f, -5.0f);
 }
 

@@ -464,7 +464,7 @@ static void test_calibration_audio(void)
 {
     printf("calibration wizard with audio analysis\n");
     static VfCalibrate c;
-    cal_run_audio(&c, 110.0f, 0.003f, 0.08f);
+    cal_run_audio(&c, 110.0f, 0.003f, 0.25f);
     const VfCalResult *r = &c.result;
     printf("  low voice + hum: f0 %.0f Hz, hum %d Hz (%.0f dB), hp %.0f Hz, sib %.1f dB (%.0f dBFS) -> deess %d thr %.0f,"
            " balance %.1f/%.1f/%.1f -> eq %.1f/%.1f/%.1f, transient %.1f dB\n",

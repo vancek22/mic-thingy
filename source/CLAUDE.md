@@ -300,7 +300,7 @@ running file is called mic-thingy.exe, so tests and the CLI never copy themselve
 the GUI turns the scope ring on while calibrating). Measures noise floor, mains hum (Goertzel 50/60 Hz + harmonics vs
 neighbours, > 15 dB -> hum filter on), noise impulsiveness, pitch (autocorrelation, median), speech spectrum balance
 (noise PSD subtracted) vs LibriSpeech targets `VF_CAL_T_*` (tools/nn/ltas.py), sibilance (p95 5-10 kHz level minus
-median 300-3000 Hz level, > -3 dB -> de-esser on). Proposes high-pass (0.55 x pitch, 60-140 Hz, >= 100 with rumble),
+median 300-3000 Hz level, > +3 dB -> de-esser on; Polish TTS measures ~0 dB). Proposes high-pass (0.55 x pitch, 60-140 Hz, >= 100 with rumble),
 gate, RNNoise strength (by SNR), compressor, EQ (half-way to the target, only beyond 4 dB, +-6 dB), de-esser threshold.
 Tests: `test_calibration_audio` (synthetic voice + hum + sibilants).
 

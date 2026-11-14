@@ -8,7 +8,6 @@
 
 #define FN   (2 * VF_FRAME_SIZE)     /* 960 */
 #define NBIN (FN / 2 + 1)            /* 481 */
-#define HF_LO 140                    /* bins HF_LO..NB-1 give the gain above 8 kHz (tools/nn/nnlib.py) */
 
 static const FxParamInfo k_params[] = {
     { "wet",   "",   0.0f,   1.0f,  1.0f,   0 },
@@ -54,18 +53,20 @@ static void nn_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
     }
     memset(s->im, 0, sizeof s->im);
     vf_fft(&s->fft, s->re, s->im, 0);
-    for (int k = 0; k < VF_NN_NB; k++)
+    const VfNnWeights *wt = s->nn.w;
+    const int nb = wt->nb;
+    for (int k = 0; k < nb; k++)
         s->feat[k] = log10f((s->re[k] * s->re[k] + s->im[k] * s->im[k]) / (float)VF_FRAME_SIZE + 1e-10f);
     const float vad = vf_nn_step(&s->nn, s->feat, s->gains);
     ctx->vad_prob = vad;
     ctx->vad_valid = 1;
 
-    float hf = 0.0f;
-    for (int k = HF_LO; k < VF_NN_NB; k++) hf += s->gains[k];
-    hf /= (float)(VF_NN_NB - HF_LO);
+    float hf = 0.0f;                             /* above the net's band: mean gain of hf_lo..hf_hi-1 */
+    for (int k = wt->hf_lo; k < wt->hf_hi; k++) hf += s->gains[k];
+    hf /= (float)(wt->hf_hi - wt->hf_lo);
     const float fl = s->floor_lin;
     for (int k = 0; k < NBIN; k++) {
-        float g = k < VF_NN_NB ? s->gains[k] : hf;
+        float g = k < nb ? s->gains[k] : hf;
         if (g < fl) g = fl;
         s->re[k] *= g; s->im[k] *= g;
         if (k > 0 && k < FN / 2) { s->re[FN - k] *= g; s->im[FN - k] *= g; }

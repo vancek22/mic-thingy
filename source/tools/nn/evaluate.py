@@ -133,6 +133,41 @@ def metrics(out, noisy, clean):
     return si_sdr(o, c), si_sdr(nz, c), pa, lvl, lost, lag
 
 
+HF_BANDS = [(300, 3000), (4000, 7000), (7000, 8000), (8000, 12000), (12000, 16000)]
+
+
+def hf_check(exe, configs, extra, tts, work):
+    """Clean wideband speech (the 48 kHz TTS voice, no noise) through each configuration: level change per band
+    on voiced frames. A denoiser must leave clean speech alone - this catches a model that learned to cut the
+    treble because its training speech had none (LibriSpeech is 16 kHz)."""
+    if tts is None:
+        print("hf check skipped: build/audiotest/speech_pl.wav missing (tools/make_testset.ps1)")
+        return
+    x = tts[:30 * L.SR]
+    inp = os.path.join(work, "hf_in.wav")
+    sf.write(inp, x, L.SR, subtype="FLOAT")
+    print("clean wideband speech, level change out/in per band (dB):")
+    print(f"{'config':10s}" + "".join(f"{f'{a // 1000}-{b // 1000}k' if a >= 1000 else f'{a}-{b // 1000}k':>10s}" for a, b in HF_BANDS))
+    for cfg in configs:
+        outp = os.path.join(work, f"hf_out_{cfg}.wav")
+        subprocess.run([exe, "-i", inp, "-o", outp] + CONFIGS[cfg] + extra, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=True)
+        y = sf.read(outp, dtype="float32")[0]
+        o, c, _ = align(y, x)
+        nfr = (len(c) - L.N) // L.HOP + 1
+        idx = np.arange(nfr)[:, None] * L.HOP + np.arange(L.N)[None, :]
+        C = np.abs(np.fft.rfft(c[idx] * L.VORBIS, axis=1)) ** 2
+        O = np.abs(np.fft.rfft(o[idx] * L.VORBIS, axis=1)) ** 2
+        e = C.sum(1)
+        act = e > e.max() * 1e-3
+        f = np.arange(L.NBINS) * 50.0
+        line = f"{cfg:10s}"
+        for a, b in HF_BANDS:
+            sel = (f >= a) & (f < b)
+            line += f"{10 * np.log10(O[act][:, sel].sum() / (C[act][:, sel].sum() + 1e-20)):10.1f}"
+        print(line)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bank", required=True)
@@ -195,6 +230,7 @@ def main():
             lo = 100 * np.mean([x[8] for x in r])
             line += f"{d:8.2f} {pa:6.1f} {lv:5.1f} {lo:5.1f}"
         print(line)
+    hf_check(a.exe, cfgs, extra, tts, a.work)
     lags = sorted(set(x[-1] for x in rows))
     print("lags seen:", lags[:10])
 

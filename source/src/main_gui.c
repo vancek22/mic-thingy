@@ -550,7 +550,7 @@ static void window_close(void)
 int main(int argc, char **argv)
 {
     vf_harden_process();
-    int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0, demo = 0, tab_arg = 0;
+    int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0, demo = 0, tab_arg = 0, cal_demo = 0;
     const char *in_file = NULL, *shot = NULL, *lang_arg = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--autostart")) autostart = 1;
@@ -563,6 +563,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--minimized")) minimized = 1;
         else if (!strcmp(argv[i], "--demo")) demo = 1;
         else if (!strcmp(argv[i], "--tab") && i + 1 < argc) tab_arg = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--cal-demo") && i + 1 < argc) cal_demo = atoi(argv[++i]);   /* screenshots of the wizard */
     }
 
     /* One mic thingy at a time: a second launch (e.g. autostart + manual) would
@@ -617,6 +618,15 @@ int main(int argc, char **argv)
     int sel_lang = (int)vf_i18n_get();
     int edit_in = 0, edit_out = 0, edit_preset = 0, edit_name = 0;
     U.tab = tab_arg >= 0 && tab_arg <= 4 ? tab_arg : 0;     /* 0..2 effect pages, 3 tools, 4 settings (--tab N for screenshots) */
+    if (cal_demo == VF_CAL_SPEECH || cal_demo == VF_CAL_DONE) {          /* --cal-demo 2|3: layout check of the wizard */
+        vf_cal_start(&U.cal);
+        U.cal.state = (VfCalState)cal_demo;
+        U.cal.frames = 600;
+        VfCalResult *r = &U.cal.result;
+        r->noise_db = -53.2f; r->speech_db = -16.4f; r->gate_threshold = 0.30f; r->comp_threshold_db = -22.4f;
+        r->comp_makeup_db = 6.4f; r->has_audio = 1; r->f0_hz = 189.0f; r->hp_hz = 104.0f; r->hum_hz = 50;
+        r->eq_low_db = -2.4f; r->eq_mid_db = 0.0f; r->eq_high_db = 1.5f; r->deess = 1;
+    }
     U.compact = st.compact;
     vf_undo_init(&U.undo, &s.pipe);
     vf_snap_capture(&s.pipe, &U.seen);

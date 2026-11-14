@@ -540,12 +540,12 @@ static void test_nn(void)
     for (int t = 0; t < NN_GOLDEN_FRAMES; t++) {
         for (int i = 0; i < VF_FFT_N; i++) { re[i] = sig_[t * VF_FRAME_SIZE + i] * win[i]; im[i] = 0; }
         vf_fft(&f, re, im, 0);
-        for (int k = 0; k < VF_NN_NB; k++) {
+        for (int k = 0; k < NN_GOLDEN_NB; k++) {
             feat[k] = log10f((re[k] * re[k] + im[k] * im[k]) / (float)VF_FRAME_SIZE + 1e-10f);
-            ferr = fmax(ferr, fabs(feat[k] - nn_golden_feat[t * VF_NN_NB + k]));
+            ferr = fmax(ferr, fabs(feat[k] - nn_golden_feat[t * NN_GOLDEN_NB + k]));
         }
-        const float v = vf_nn_step(&nn, nn_golden_feat + t * VF_NN_NB, g);
-        for (int k = 0; k < VF_NN_NB; k++) gerr = fmax(gerr, fabs(g[k] - nn_golden_gain[t * VF_NN_NB + k]));
+        const float v = vf_nn_step(&nn, nn_golden_feat + t * NN_GOLDEN_NB, g);
+        for (int k = 0; k < NN_GOLDEN_NB; k++) gerr = fmax(gerr, fabs(g[k] - nn_golden_gain[t * NN_GOLDEN_NB + k]));
         verr = fmax(verr, fabs(v - nn_golden_vad[t]));
     }
     CHECK(ferr < 2e-3, "features differ from torch by %.2g", ferr);

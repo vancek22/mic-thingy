@@ -2,11 +2,13 @@
 
 Signal path (must match src/dsp/fx_nn.c exactly):
   48 kHz mono float -> frames of 960 samples, hop 480, Vorbis window -> 960-point DFT (481 bins)
-  features: log10(|X|^2 / 480 + 1e-10) for the first NB = 161 bins (0..8 kHz, 50 Hz apart), standardised
+  features: log10(|X|^2 / 480 + 1e-10) for the first NB = 145 bins (0..7.2 kHz, 50 Hz apart), standardised
   net: dense(NB->H) tanh -> GRU(H) -> GRU(H) -> dense(3H -> NB + 1): NB sigmoid gains + 1 sigmoid VAD
-  synthesis: gains on bins 0..160, bins above 8 kHz get the mean gain of bins 140..160, IDFT, Vorbis
-  window, overlap-add. Delay: 480 samples (10 ms), like RNNoise.
-LibriSpeech is 16 kHz, so speech has nothing above 8 kHz; that is why the net only looks below 8 kHz.
+  synthesis: gains on bins 0..NB-1, every bin above gets the mean gain of bins HF_LO..HF_HI-1 (5-7 kHz), IDFT,
+  Vorbis window, overlap-add. Delay: 480 samples (10 ms), like RNNoise.
+LibriSpeech is 16 kHz (and its resampling rolls off towards 8 kHz), so the net only looks at and is only scored on
+bins the training speech really fills. Run 2 (161 bins, loss on all 481) learned to cut 7-8 kHz on clean speech
+(gain 0.2-0.35), i.e. a muffled voice; evaluate.py now measures high-band preservation on wideband speech.
 """
 import math
 
@@ -19,8 +21,8 @@ SR = 48000
 N = 960
 HOP = 480
 NBINS = 481
-NB = 161          # bins the net sees / predicts (0..8 kHz)
-HF_LO = 140       # bins HF_LO..NB-1 supply the gain for everything above 8 kHz
+NB = 145          # bins the net sees / predicts (0..7.2 kHz)
+HF_LO, HF_HI = 100, 140   # their mean gain (5-7 kHz) is used for every bin >= NB
 SEG_S = 4
 SEG = SR * SEG_S  # samples per training segment
 EPS = 1e-10
@@ -417,7 +419,7 @@ class Denoiser(nn.Module):
 def apply_gains(X, gains):
     """X: complex [B, 481, F]; gains [B, F, NB] -> enhanced complex [B, 481, F]."""
     g = gains.transpose(1, 2)                                   # [B, NB, F]
-    hf = g[:, HF_LO:NB, :].mean(1, keepdim=True)
+    hf = g[:, HF_LO:HF_HI, :].mean(1, keepdim=True)
     full = torch.cat([g, hf.expand(-1, NBINS - NB, -1)], 1)
     return X * full
 

@@ -9,7 +9,8 @@ static float sigm(float x) { return 1.0f / (1.0f + expf(-x)); }
 int vf_nn_init(VfNn *n, const VfNnWeights *w)
 {
     memset(n, 0, sizeof *n);
-    if (!w || w->nb != VF_NN_NB || w->h <= 0 || w->h > VF_NN_MAXH) return -1;
+    if (!w || w->nb <= 0 || w->nb > VF_NN_NB || w->h <= 0 || w->h > VF_NN_MAXH || w->hf_lo < 0 || w->hf_hi > w->nb
+        || w->hf_lo >= w->hf_hi) return -1;
     n->w = w;
     (void)vf_simd_avx2();
     return 0;
