@@ -43,6 +43,9 @@ sd.wait()
 '''
 
 
+PLAYER_EXE = ""          # --player: an external program plays the test signal (see run_through)
+
+
 def run_through(sig_in, play, rec):
     """Plays sig_in (mono 48 k) and records the app's output; returns the recording aligned to sig_in.
     The playback runs in a SEPARATE process: Krisp captures the speaker output of the program that records its
@@ -63,6 +66,11 @@ def run_through(sig_in, play, rec):
     with open(script, "w") as f:
         f.write(PLAYER)
     cmd = f'"{sys.executable}" "{script}" "{tmp}" {pi}'
+    if PLAYER_EXE:
+        # Krisp treats every "python" process as the call app and cancels its playback as echo: play the file
+        # with mic thingy's own CLI instead (chain bypassed, output to the VB-Cable input)
+        cmd = (f'"{PLAYER_EXE}" --in-file "{tmp}" --vmic --no-config --seconds {len(lead) / L.SR + 0.5:.1f} '
+               f'-c "bypass all on"')
     subprocess.run(["powershell", "-NoProfile", "-Command",
                     f"Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine='{cmd}'}} | Out-Null"],
                    check=True)
@@ -87,7 +95,12 @@ def main():
     ap.add_argument("--rec", default="Krisp")
     ap.add_argument("--reps", type=int, default=1, help="items per family and SNR (the set has 2)")
     ap.add_argument("--families", default="")
+    ap.add_argument("--player", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "build",
+                    "mic-thingy-cli.exe"), help="program that plays the test file into the cable ('' = a python process; "
+                    "Krisp then cancels it as echo)")
     a = ap.parse_args()
+    global PLAYER_EXE
+    PLAYER_EXE = os.path.abspath(a.player) if a.player else ""
     setdir = os.path.join(a.work, "set")
     items = [(l.split()[0], l.split()[1], int(l.split()[2])) for l in open(os.path.join(setdir, "items.txt"))]
     fams = set(a.families.split(",")) if a.families else None

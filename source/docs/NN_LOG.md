@@ -63,3 +63,26 @@ Clean wideband speech through the C effect (run3 @ 1500): 300-3k 0.0, 4-7k -0.4,
 **Next trainer: `source/ml`** (2026-11-14): config-driven project (nsnet / crn / erbdf), real noise and RIRs
 (OpenSLR 28, DEMAND), MR-STFT + SI-SDR + compressed spectral loss, DNSMOS, streaming ONNX, `export_c.py`
 for this effect. See `source/ml/README.md`.
+
+## Krisp benchmark (2026-11-14, Krisp 3.19.7 desktop, "Cancel my noise")
+Loop (`tools/nn/krisp_sim.py`): test mixtures play into VB-Cable "CABLE Input" from `mic-thingy-cli` (chain
+bypassed), Krisp's microphone = "CABLE Output", the script records "Krisp Microphone". Pitfall found in Krisp's
+log: it treats every `python` process as the call app and uses its playback as the echo-cancellation
+reference - playing from Python made Krisp output silence (energy after processing ~1e-6). Training was
+suspended during the run (Krisp logged CPU overload otherwise). Same 52 items (held-out speakers, 13 families,
+SNR 0/5/10/20); sample-exact SI-SDR is not meaningful through the device loop, so DNSMOS P.835 (no reference) +
+energy metrics:
+
+| system | DNSMOS SIG / BAK / OVRL | pause atten. | lost speech |
+|---|---|---|---|
+| noisy | 3.17 / 2.92 / 2.50 | - | - |
+| RNNoise | 3.26 / 3.50 / 2.75 | 8.2 dB | 5.0 % |
+| nn run3 @ 1500 | 3.26 / 3.73 / 2.86 | 27.7 dB | 4.6 % |
+| nn, floor -60 dB | 3.25 / 3.75 / 2.86 | 30.3 dB | 4.6 % |
+| **Krisp** | **3.36 / 4.00 / 3.06** | 36.5 dB | 11.4 % |
+
+Krisp wins OVRL on 12 of 13 families (we win mouse clicks 3.05 vs 3.03); the gap is mostly background (BAK
+4.00 vs 3.73). Krisp removes more and also loses more speech (babble 38 %, fan 23 %). Clean wideband speech
+through Krisp: -0.4 / -1.6 / -1.6 / -1.9 / -3.1 dB per band (ours: 0.0 / -0.4 / -0.3 / -0.3 / -1.8).
+A lower gain floor alone does not close the gap. Next: longer training on real noise (`source/ml`, nsnet48k
+run started, stopped at step 1000 on the user's request to free the machine), then erbdf/crn.
