@@ -10,6 +10,19 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
 
+# ---------------------------------------------------------------- hardening
+# Stack canaries in every function with a local buffer (ours and the vendored libraries: they parse audio files and
+# device names); Windows: ASLR (64-bit, high entropy) + DEP spelled out; Linux: read-only relocations, no lazy binding.
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  add_compile_options(-fstack-protector-strong)
+  add_link_options(-fstack-protector-strong)
+  if(WIN32)
+    add_link_options(-static -Wl,--dynamicbase -Wl,--nxcompat -Wl,--high-entropy-va)   # -static: no libssp / libgcc DLL next to the .exe
+  elseif(UNIX AND NOT APPLE)
+    add_link_options(-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack)
+  endif()
+endif()
+
 # ---------------------------------------------------------------- RNNoise
 # Upstream has no CMake support; build the portable (non-RTCD) C path.
 # Weights are compiled in (src/rnnoise_data.c), so rnnoise_create(NULL) works.
@@ -120,7 +133,7 @@ add_library(vfcore STATIC
 target_include_directories(vfcore PUBLIC src)
 target_link_libraries(vfcore PUBLIC rnnoise miniaudio)
 if(WIN32)
-  target_link_libraries(vfcore PUBLIC winhttp ole32 uuid shell32)
+  target_link_libraries(vfcore PUBLIC ole32 uuid shell32)   # winhttp is loaded at run time (app/update.c)
 endif()
 
 # Virtual microphone: PipeWire on Linux, stub elsewhere (Windows uses VB-Cable).
@@ -181,7 +194,7 @@ if(VF_GUI)
   target_include_directories(mic-thingy PRIVATE third_party/raygui)
   target_link_libraries(mic-thingy PRIVATE vfcore raylib)
   if(WIN32)
-    target_link_libraries(mic-thingy PRIVATE shell32 user32 gdi32 dwmapi)
+    target_link_libraries(mic-thingy PRIVATE shell32 user32 gdi32)   # dwmapi / winmm: loaded at run time (app/win_chrome.c)
     set_target_properties(mic-thingy PROPERTIES WIN32_EXECUTABLE ON)   # no console window
   endif()
   if(NOT MSVC)

@@ -814,6 +814,10 @@ static void ui_tick(VfSession *s, double now, int running_window, UiLink *L)
         if (ok) note_set(tr(S_N_REC_SAVED_FMT), U.rec_path); else note_set("%s", tr(S_N_REC_FAIL));
     }
     U.rec_was_active = vf_rec_active(&U.rec);
+    /* a restarted stream (another device picked, device lost and found) is a fresh engine: hook the running
+     * recording / A-B capture up again, or they would wait for audio that never comes */
+    if (s->running && vf_rec_active(&U.rec) && atomic_load(&s->eng.rec_ring) != &U.rec.ring) atomic_store(&s->eng.rec_ring, &U.rec.ring);
+    if (s->running && U.ab.state == VF_AB_RECORDING && atomic_load(&s->eng.capture) != &U.ab.cap) atomic_store(&s->eng.capture, &U.ab.cap);
 
     /* spectrum feed only while it is visible */
     const int howl_on = st->howl_guard && s->running && s->has_mon && U.scope_ready;
@@ -893,7 +897,7 @@ static void ui_handle_drops(VfSession *s, VfSettings *st)
     for (unsigned i = 0; i < files.count; i++) {
         const char *p = files.paths[i];
         if (IsFileExtension(p, ".ini")) {
-            char *data = LoadFileText(p);
+            char *data = GetFileLength(p) <= (1 << 20) ? LoadFileText(p) : NULL;   /* a preset is a few KB; same cap as vf_ini_load */
             const int k = data ? vf_preset_import_text(&s->pipe, data) : -1;
             if (data) UnloadFileText(data);
             if (k > 0) note_set(tr(S_N_IMPORTED_FMT), k); else note_set("%s", tr(S_N_IMPORT_FAIL));

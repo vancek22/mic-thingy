@@ -2,7 +2,45 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <dwmapi.h>
+#include "util/platform.h"
+
+/* dwmapi.dll and winmm.dll are not Windows "known DLLs": as ordinary imports they would be searched in the program's
+ * own folder first, before main() runs (DLL planting next to a downloaded .exe). Both are loaded from System32 on
+ * first use instead (vf_load_system_library). */
+typedef void (*AnyFn)(void);
+static AnyFn sys_fn(const char *dll, const char *name)
+{
+    HMODULE m = (HMODULE)vf_load_system_library(dll);       /* a second load only bumps the reference count */
+    return m ? (AnyFn)GetProcAddress(m, name) : NULL;
+}
+
+static HRESULT dwm_set(HWND h, DWORD attr, const void *v, DWORD n)
+{
+    static HRESULT (WINAPI *fn)(HWND, DWORD, LPCVOID, DWORD);
+    static int tried;
+    if (!tried) { tried = 1; fn = (HRESULT (WINAPI *)(HWND, DWORD, LPCVOID, DWORD))sys_fn("dwmapi.dll", "DwmSetWindowAttribute"); }
+    return fn ? fn(h, attr, v, n) : E_FAIL;
+}
+#define DwmSetWindowAttribute dwm_set
+
+/* raylib calls timeBeginPeriod(1) / timeEndPeriod(1) (winmm.dll) through the import table. Defining the import
+ * pointers here keeps winmm.dll out of the .exe's import table; the calls land in these two functions. */
+static UINT WINAPI time_period(UINT ms, int begin)
+{
+    static UINT (WINAPI *fb)(UINT), (WINAPI *fe)(UINT);
+    static int tried;
+    if (!tried) {
+        tried = 1;
+        fb = (UINT (WINAPI *)(UINT))sys_fn("winmm.dll", "timeBeginPeriod");
+        fe = (UINT (WINAPI *)(UINT))sys_fn("winmm.dll", "timeEndPeriod");
+    }
+    UINT (WINAPI *f)(UINT) = begin ? fb : fe;
+    return f ? f(ms) : 97;                                   /* TIMERR_NOCANDO */
+}
+static UINT WINAPI vf_time_begin(UINT ms) { return time_period(ms, 1); }
+static UINT WINAPI vf_time_end(UINT ms) { return time_period(ms, 0); }
+UINT (WINAPI *__imp_timeBeginPeriod)(UINT) = vf_time_begin;
+UINT (WINAPI *__imp_timeEndPeriod)(UINT) = vf_time_end;
 
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20

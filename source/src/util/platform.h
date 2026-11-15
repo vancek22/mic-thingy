@@ -11,8 +11,14 @@
 /* fopen() taking a UTF-8 path on every platform. */
 FILE *vf_fopen(const char *path, const char *mode);
 
-/* Call first thing in main(): Windows - drop the current directory from the DLL search path. */
+/* Call first thing in main(): Windows - DLLs loaded by name from now on come from the system directory only (never
+ * from the program's own folder, e.g. Downloads, or the current directory). */
 void vf_harden_process(void);
+
+/* Windows: loads a system DLL by bare name ("winhttp.dll") from System32 only; NULL elsewhere / on failure.
+ * Use it instead of linking a DLL that is not a Windows "known DLL": such an import would be resolved before main()
+ * with the program's own folder searched first (DLL planting next to a downloaded .exe). */
+void *vf_load_system_library(const char *name);
 
 /* Windows: a "mic thingy" shortcut in the Start menu, so Windows search finds the program. enable=1 creates it (or
  * repairs one that points elsewhere), 0 removes it; both idempotent. 0 = ok. Elsewhere: -1, does nothing. */

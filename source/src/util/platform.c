@@ -159,10 +159,30 @@ int vf_executable_path(char *out, size_t n)
 
 #define RUN_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 
+#ifndef LOAD_LIBRARY_SEARCH_SYSTEM32
+#define LOAD_LIBRARY_SEARCH_SYSTEM32 0x00000800
+#endif
+#ifndef LOAD_LIBRARY_SEARCH_USER_DIRS
+#define LOAD_LIBRARY_SEARCH_USER_DIRS 0x00000400
+#endif
+
 void vf_harden_process(void)
 {
     SetDllDirectoryW(L"");                 /* no DLLs from the current directory */
     SetSearchPathMode(BASE_SEARCH_PATH_ENABLE_SAFE_SEARCHMODE | BASE_SEARCH_PATH_PERMANENT);
+    /* Every later LoadLibrary("name.dll") - ours, GLFW's (xinput, dinput8, dwmapi...), miniaudio's - searches System32
+     * only, not the folder the .exe sits in: a DLL dropped next to a downloaded mic-thingy.exe is never loaded.
+     * Looked up at run time so the program still starts on a Windows without the function (pre-KB2533623). */
+    HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+    BOOL (WINAPI *set_dirs)(DWORD) = k32 ? (BOOL (WINAPI *)(DWORD))(void (*)(void))GetProcAddress(k32, "SetDefaultDllDirectories") : NULL;
+    if (set_dirs) set_dirs(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS);
+}
+
+void *vf_load_system_library(const char *name)
+{
+    wchar_t w[64];
+    if (!name || strchr(name, '\\') || strchr(name, '/') || strchr(name, ':') || to_w(name, w, 64)) return NULL;   /* bare names only */
+    return (void *)LoadLibraryExW(w, NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 }
 
 int vf_autostart_get_named(const char *name)
@@ -321,6 +341,7 @@ int vf_mkdir_p(const char *path)
 }
 
 void vf_harden_process(void) {}
+void *vf_load_system_library(const char *name) { (void)name; return NULL; }
 int vf_startmenu_set(int enable) { (void)enable; return -1; }   /* Linux: packaging/linux/install.sh */
 int vf_startmenu_exists(void) { return 0; }
 int vf_remove(const char *path) { return remove(path); }
@@ -435,11 +456,23 @@ int vf_autostart_set_named(const char *name, int enable)
     char *slash = strrchr(dir, '/');
     if (slash) *slash = '\0';
     if (vf_mkdir_p(dir) || vf_executable_path(exe, sizeof exe)) return -1;
+    /* Exec= is parsed twice (string escapes, then quoting): inside the double quotes " ` $ and \ need a backslash,
+     * which itself is written doubled, and % starts a field code. A path with a line break cannot be written. */
+    char q[2 * VF_PATH_MAX + 8];
+    size_t o = 0;
+    for (const char *c = exe; *c && o + 6 < sizeof q; c++) {
+        if ((unsigned char)*c < 0x20) return -1;
+        if (*c == '\\') { memcpy(q + o, "\\\\\\\\", 4); o += 4; }
+        else if (*c == '"' || *c == '`' || *c == '$') { q[o++] = '\\'; q[o++] = '\\'; q[o++] = *c; }
+        else if (*c == '%') { q[o++] = '%'; q[o++] = '%'; }
+        else q[o++] = *c;
+    }
+    q[o] = '\0';
     FILE *f = fopen(p, "w");
     if (!f) return -1;
     fprintf(f, "[Desktop Entry]\nType=Application\nName=mic thingy\n"
                "Comment=Real-time microphone noise filter\n"
-               "Exec=\"%s\" " VF_AUTOSTART_ARGS "\nTerminal=false\nX-GNOME-Autostart-enabled=true\n", exe);
+               "Exec=\"%s\" " VF_AUTOSTART_ARGS "\nTerminal=false\nX-GNOME-Autostart-enabled=true\n", q);
     return fclose(f) == 0 ? 0 : -1;
 }
 #endif

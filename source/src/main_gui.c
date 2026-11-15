@@ -828,6 +828,10 @@ int main(int argc, char **argv)
                         if ((k = find_name(&s.caps, n_in)) >= 0) sel_in = k;
                         if ((k = find_name(&s.plays, n_out)) >= 0) sel_out = k;
                         if ((k = find_name(&s.plays, n_mon)) >= 0) sel_mon = k;
+                        /* a device that is gone for good: the list got shorter, never leave an index past its end */
+                        if (sel_in >= s.caps.count) sel_in = (k = vf_session_default_mic(&s)) >= 0 ? k : 0;
+                        if (sel_out >= s.plays.count) sel_out = 0;
+                        if (sel_mon >= s.plays.count) sel_mon = 0;
                         build_list(list_in, sizeof list_in, &s.caps, "Microphone");
                         build_list(list_out, sizeof list_out, &s.plays, "Speakers");
                     }

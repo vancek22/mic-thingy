@@ -123,11 +123,62 @@ int vf_update_verify(const char *path, const char *want_hex)
 #include <windows.h>
 #include <winhttp.h>
 
+/* winhttp.dll is not a Windows "known DLL": linked normally it would be looked up in the program's own folder first
+ * (before main() runs), so anything called winhttp.dll next to a downloaded mic-thingy.exe would be loaded. It is
+ * loaded from System32 on the first update check instead. */
+static struct {
+    int tried;
+    HINTERNET (WINAPI *Open)(LPCWSTR, DWORD, LPCWSTR, LPCWSTR, DWORD);
+    BOOL (WINAPI *SetTimeouts)(HINTERNET, int, int, int, int);
+    HINTERNET (WINAPI *Connect)(HINTERNET, LPCWSTR, INTERNET_PORT, DWORD);
+    HINTERNET (WINAPI *OpenRequest)(HINTERNET, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR *, DWORD);
+    BOOL (WINAPI *SendRequest)(HINTERNET, LPCWSTR, DWORD, LPVOID, DWORD, DWORD, DWORD_PTR);
+    BOOL (WINAPI *ReceiveResponse)(HINTERNET, LPVOID);
+    BOOL (WINAPI *QueryHeaders)(HINTERNET, DWORD, LPCWSTR, LPVOID, LPDWORD, LPDWORD);
+    BOOL (WINAPI *ReadData)(HINTERNET, LPVOID, DWORD, LPDWORD);
+    BOOL (WINAPI *CloseHandle)(HINTERNET);
+} g_wh;
+
+typedef void (*AnyFn)(void);
+
+/* 0 = every function is there. Called from the single check / install worker thread (never two at once). */
+static int winhttp_load(void)
+{
+    if (!g_wh.tried) {
+        g_wh.tried = 1;
+        HMODULE m = (HMODULE)vf_load_system_library("winhttp.dll");
+        if (m) {
+            g_wh.Open = (HINTERNET (WINAPI *)(LPCWSTR, DWORD, LPCWSTR, LPCWSTR, DWORD))(AnyFn)GetProcAddress(m, "WinHttpOpen");
+            g_wh.SetTimeouts = (BOOL (WINAPI *)(HINTERNET, int, int, int, int))(AnyFn)GetProcAddress(m, "WinHttpSetTimeouts");
+            g_wh.Connect = (HINTERNET (WINAPI *)(HINTERNET, LPCWSTR, INTERNET_PORT, DWORD))(AnyFn)GetProcAddress(m, "WinHttpConnect");
+            g_wh.OpenRequest = (HINTERNET (WINAPI *)(HINTERNET, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR *, DWORD))(AnyFn)GetProcAddress(m, "WinHttpOpenRequest");
+            g_wh.SendRequest = (BOOL (WINAPI *)(HINTERNET, LPCWSTR, DWORD, LPVOID, DWORD, DWORD, DWORD_PTR))(AnyFn)GetProcAddress(m, "WinHttpSendRequest");
+            g_wh.ReceiveResponse = (BOOL (WINAPI *)(HINTERNET, LPVOID))(AnyFn)GetProcAddress(m, "WinHttpReceiveResponse");
+            g_wh.QueryHeaders = (BOOL (WINAPI *)(HINTERNET, DWORD, LPCWSTR, LPVOID, LPDWORD, LPDWORD))(AnyFn)GetProcAddress(m, "WinHttpQueryHeaders");
+            g_wh.ReadData = (BOOL (WINAPI *)(HINTERNET, LPVOID, DWORD, LPDWORD))(AnyFn)GetProcAddress(m, "WinHttpReadData");
+            g_wh.CloseHandle = (BOOL (WINAPI *)(HINTERNET))(AnyFn)GetProcAddress(m, "WinHttpCloseHandle");
+        }
+    }
+    return g_wh.Open && g_wh.SetTimeouts && g_wh.Connect && g_wh.OpenRequest && g_wh.SendRequest &&
+           g_wh.ReceiveResponse && g_wh.QueryHeaders && g_wh.ReadData && g_wh.CloseHandle ? 0 : -1;
+}
+#define WinHttpOpen            g_wh.Open
+#define WinHttpSetTimeouts     g_wh.SetTimeouts
+#define WinHttpConnect         g_wh.Connect
+#define WinHttpOpenRequest     g_wh.OpenRequest
+#define WinHttpSendRequest     g_wh.SendRequest
+#define WinHttpReceiveResponse g_wh.ReceiveResponse
+#define WinHttpQueryHeaders    g_wh.QueryHeaders
+#define WinHttpReadData        g_wh.ReadData
+#define WinHttpCloseHandle     g_wh.CloseHandle
+
 /* returns the HTTP status (200, 404, ...) with the body in buf, or -1 on a network failure */
 static int http_get(char *buf, size_t cap)
 {
     int status = -1;
     size_t used = 0;
+    buf[0] = '\0';
+    if (winhttp_load() != 0) return -1;
     HINTERNET ses = WinHttpOpen(L"mic-thingy", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0);
     if (!ses) return -1;
     WinHttpSetTimeouts(ses, 6000, 6000, 8000, 8000);
@@ -159,6 +210,7 @@ static int http_download(const char *path, const char *outfile, long max_bytes, 
     int status = -1;
     atomic_store(&u->got, 0);
     atomic_store(&u->total, 0);
+    if (winhttp_load() != 0) return -1;
     HINTERNET ses = WinHttpOpen(L"mic-thingy", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0);
     if (!ses) return -1;
     WinHttpSetTimeouts(ses, 8000, 8000, 15000, 30000);
@@ -213,7 +265,7 @@ static void open_url(const char *url)
 static int http_get(char *buf, size_t cap)
 {
     /* fixed command line, no user data in it; the status code is appended after the body */
-    FILE *p = popen("curl -sS --max-time 10 -H 'Accept: application/vnd.github+json' -A mic-thingy "
+    FILE *p = popen("curl -sS --proto =https --max-time 10 -H 'Accept: application/vnd.github+json' -A mic-thingy "
                     "-w '\\n%{http_code}' https://" API_HOST API_PATH " 2>/dev/null", "r");
     if (!p) return -1;
     size_t used = 0, r;
