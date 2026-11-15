@@ -68,6 +68,8 @@ static int rgb_row(Rectangle box, float y, const char *lbl, float *v)
 }
 
 
+static const char *panel_title(const char *id);
+
 static Color col_of(unsigned rgb) { return (Color){ (unsigned char)(rgb >> 16), (unsigned char)(rgb >> 8), (unsigned char)rgb, 255 }; }
 
 /* a clickable colour chip; returns 1 when clicked */
@@ -206,6 +208,7 @@ static void draw_look(Rectangle area, VfSession *s, VfSettings *st)
     nth_token(tr(S_TABS_ALL), lk->start_tab, t, sizeof t);
     const int d = stepper(box, &py, tr(S_LK_STARTTAB), t);
     if (d) lk->start_tab = (lk->start_tab + d + VF_LOOK_TABS) % VF_LOOK_TABS;
+    if (GuiButton((Rectangle){ box.x + 14, box.y + ph - 106, box.width - 28, 26 }, tr(S_LK_LAYOUT_RESET))) lk->layout[0] = '\0';
     py = box.y + ph - 72;
     if (GuiButton((Rectangle){ box.x + 14, py, 128, 26 }, tr(S_LK_COPY))) {
         char buf[4096];
@@ -258,67 +261,65 @@ static void draw_look(Rectangle area, VfSession *s, VfSettings *st)
     /* --- 6: which effect panels are shown (hidden ones keep running), their order --- */
     box = (Rectangle){ area.x + 2 * (pw + 6), area.y + (ph + 6), pw, ph };
     panel(box, tr(S_PN_LK_PANELS), -1);
-    py = box.y + 34;
-    for (int i = 0; i < s->pipe.count; i++) {
-        const Fx *fx = s->pipe.fx[i];
-        const float cx = box.x + 14 + (float)(i % 2) * 138, cy = py + (float)(i / 2) * 21;
-        bool vis = !vf_look_hidden(lk, fx->name);
-        const bool was = vis;
-        GuiCheckBox((Rectangle){ cx, cy, 16, 16 }, "", &vis);
-        text_fit_head(F.ui, tr_fx(fx->name), cx + 22, cy, 14, 112, vis ? C_TEXT : C_DISABLED);
-        if (vis != was) vf_look_set_hidden(lk, fx->name, !vis);
+    py = box.y + 32;
+    {   /* effects (old Basic, Extra, Effects order), then the tools */
+        const char *ids[VF_MAX_FX + VF_TOOL_COUNT];
+        int nid = 0;
+        for (int pg_ = 0; pg_ < VF_LOOK_PAGES; pg_++)
+            for (int q = 0; q < s->pipe.count; q++)
+                if (s->pipe.fx[q]->page == pg_ || (pg_ == VF_LOOK_PAGES - 1 && s->pipe.fx[q]->page >= VF_LOOK_PAGES)) ids[nid++] = s->pipe.fx[q]->name;
+        for (int k = 0; k < VF_TOOL_COUNT; k++) ids[nid++] = k_tool_ids[k];
+        for (int i = 0; i < nid; i++) {
+            const float cx = box.x + 14 + (float)(i % 2) * 138, cy = py + (float)(i / 2) * 19;
+            bool vis = !vf_look_hidden(lk, ids[i]);
+            const bool was = vis;
+            GuiCheckBox((Rectangle){ cx, cy, 14, 14 }, "", &vis);
+            text_fit_head(F.ui, panel_title(ids[i]), cx + 20, cy - 1, 13, 114, vis ? C_TEXT : C_DISABLED);
+            if (vis != was) vf_look_set_hidden(lk, ids[i], !vis);
+        }
     }
-    if (GuiButton((Rectangle){ box.x + 14, box.y + ph - 64, box.width - 28, 24 }, tr(S_LK_LAYOUT_RESET))) lk->layout[0] = '\0';
     text_fit_head(F.ui, tr(S_LK_DRAG_HINT), box.x + 14, box.y + ph - 36, 14, box.width - 28, C_DISABLED);
-    text_fit_head(F.ui, tr(S_LK_PANELS_NOTE), box.x + 14, box.y + ph - 20, 14, box.width - 28, C_DISABLED);
 }
 
-/* A panel carried by its title strip (main_gui.c starts the drag): drop it on another place of the 3 x 2 grid to
- * reorder the page, or on another effect tab (Basic / Extra / Effects) to move it there. Pages hold 6 panels. */
-static void drag_panel(VfSettings *st, Vector2 mouse, const char *const *names, const int *defp, const int *ord,
-                       const int *pg, int n)
+/* title of a panel id: an effect name or a tool id (t_*) */
+static const char *panel_title(const char *id)
+{
+    static const VfStr tool_titles[VF_TOOL_COUNT] = { S_PN_MIX, S_PN_TEST, S_PN_CAL, S_PN_BOARD, S_PN_QUALITY, S_PN_SPECTRUM };
+    for (int k = 0; k < VF_TOOL_COUNT; k++)
+        if (!strcmp(id, k_tool_ids[k])) return tr(tool_titles[k]);
+    return tr_fx(id);
+}
+
+/* A panel carried by its title strip (main_gui.c starts the drag): drop it on another place of the grid. The view
+ * scrolls when the panel is carried near its top or bottom edge. Only the drawing order changes, never the audio chain. */
+static void drag_panel(VfSettings *st, Vector2 mouse, Rectangle view, const char *const *names, const int *defp, int n,
+                       const int *vis_all, int nvis_all)
 {
     const float pw = 292, ph = 276;
-    const int fx = U.drag_fx, from = pg[fx];
+    const int id = U.drag_fx;
     if (fabsf(mouse.x - U.drag_sx) + fabsf(mouse.y - U.drag_sy) > 6) U.drag_moved = 1;
-    const float gp = (float)GuiGetStyle(TOGGLE, GROUP_PADDING);
-    int hover_tab = -1, hover_slot = -1;
-    for (int t = 0; t < VF_LOOK_PAGES; t++)
-        if (CheckCollisionPointRec(mouse, (Rectangle){ 282 + t * (120 + gp), TOP, 120, 24 })) hover_tab = t;
-    if (mouse.x >= 282 && mouse.y >= TOP + 30) {
-        const int col = (int)((mouse.x - 282) / (pw + 6)), row = (int)((mouse.y - TOP - 30) / (ph + 6));
-        if (col < 3 && row < 2) hover_slot = row * 3 + col;
-    }
-    int vis[64], nv = 0, count[VF_LOOK_PAGES] = { 0 };
-    for (int k = 0; k < n; k++) {
-        const int i = ord[k];
-        if (vf_look_hidden(&st->look, names[i])) continue;
-        count[pg[i]]++;
-        if (pg[i] == from && i != fx) vis[nv++] = i;
+    int vis[64], nv = 0;                                   /* visible panels without the carried one */
+    for (int k = 0; k < nvis_all && nv < 64; k++)
+        if (vis_all[k] != id) vis[nv++] = vis_all[k];
+    int target = -1;
+    if (CheckCollisionPointRec(mouse, view)) {
+        const int col = (int)((mouse.x - view.x) / (pw + 6)), row = (int)((mouse.y - view.y + U.scroll) / (ph + 6));
+        if (col >= 0 && col < 3 && row >= 0) target = row * 3 + col;
+        if (target > nv) target = nv;
     }
     if (U.drag_moved) {
-        if (hover_tab >= 0 && hover_tab != from) {
-            const int full = count[hover_tab] >= 6;
-            DrawRectangleLinesEx((Rectangle){ 282 + hover_tab * (120 + gp), TOP, 120, 24 }, 3, full ? C_RED : C_NEON);
-        } else if (hover_slot >= 0 && U.tab == from) {
-            const int target = hover_slot < nv ? hover_slot : nv;
-            DrawRectangleLinesEx((Rectangle){ 282 + (float)(target % 3) * (pw + 6), TOP + 30 + (float)(target / 3) * (ph + 6), pw, ph }, 3, C_NEON);
+        if (target >= 0) {
+            BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
+            DrawRectangleLinesEx((Rectangle){ view.x + (float)(target % 3) * (pw + 6), view.y + (float)(target / 3) * (ph + 6) - U.scroll, pw, ph }, 3, C_NEON);
+            EndScissorMode();
         }
         Rectangle g = { mouse.x - U.drag_dx, mouse.y - U.drag_dy, pw, 28 };    /* the carried title strip */
         DrawRectangleGradientH((int)g.x, (int)g.y, (int)g.width, (int)g.height, C_SLATE_A, C_SLATE_B);
         DrawRectangleLinesEx(g, 2, C_NEON);
-        text(F.bold, tr_fx(names[fx]), g.x + 10, g.y + 7, C_TITLE);
+        text(F.bold, panel_title(names[id]), g.x + 10, g.y + 7, C_TITLE);
     }
     if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {                                 /* dropped */
-        if (U.drag_moved) {
-            if (hover_tab >= 0 && hover_tab != from) {
-                if (count[hover_tab] < 6) vf_look_move(&st->look, names, defp, n, fx, hover_tab, -1);
-                else note_set("%s", tr(S_LK_PAGE_FULL));
-            } else if (hover_slot >= 0 && U.tab == from) {
-                const int target = hover_slot < nv ? hover_slot : nv;
-                vf_look_move(&st->look, names, defp, n, fx, from, target < nv ? vis[target] : -1);
-            }
-        }
+        if (U.drag_moved && target >= 0) vf_look_move(&st->look, names, defp, n, id, 0, target < nv ? vis[target] : -1);
         U.drag_fx = -1;
     }
 }

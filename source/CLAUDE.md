@@ -250,7 +250,7 @@ spectrum analyser (UI sets/clears it). Engine hooks: `pre_tap` (raw input), `cap
 also with no window (hotkeys, mute, overlay, stats, per-program presets, per-mic profiles). Colours: `g_c[]` filled by
 `apply_theme()`; use the `C_*` macros and `mixc()`; text on dark strips goes through `on_dark()`. Compact window is its
 own drawing path (`draw_compact`). Switching theme at runtime: `retheme()` (must reset the raygui font first).
-Screenshot flags: `--tab N` (0..5), settings.ini `theme = amber|classic`, `compact = 1`.
+Screenshot flags: `--tab N` (0 main, 1 settings, 2 look), `--scroll PX` (main view scrolled down), settings.ini `theme = amber|classic`, `compact = 1`.
 settings.ini gained [window] [mix] [board] [hotkeys] [apps] and app keys (theme, compact, overlay, per_mic_profiles,
 auto_mute_*), monitor keys live in [audio_extra]. Old files still load (defaults for new keys).
 
@@ -396,3 +396,17 @@ installed for an update test. Versions can have a 4th number (revision): v1.0.3.
 - New look keys are in `settings_hash()` (they were missing at first: layout changes were not autosaved - caught by the
   posted-mouse drag test). Dev screenshots/click tests now run a renamed copy (`mt-dev.exe`) so the installed Start-menu copy
   is not overwritten.
+
+## One main view instead of Basic / Extra / Effects / Tools (2026-11-15)
+Tabs are now Main / Settings / Look (`VF_LOOK_TABS` 3; `U.tab` 0/1/2). The main view is ONE scrolling 3-column grid with every
+effect panel (default order: the old Basic, Extra, Effects pages) and the six tool panels (ids `t_mix`, `t_test`, `t_cal`,
+`t_board`, `t_quality`, `t_spectrum`; `draw_tool(k, box, ...)` in gui_tools.inc, one branch per tool). Every panel is dragged
+by its title strip and dropped on another grid place (`drag_panel` in look_tab.inc; carrying near the top / bottom edge
+scrolls); the order is `[look] layout` (pages are always 0 now). `vf_look_flatten_layout()` rewrites a v1.0.4.0 per-tab layout
+once (stable by old page, tools last - tested); old `start_tab` 3/4/5 map to 0/1/2. Tools can be hidden like effects.
+Scrolling: wheel anywhere in the view except on a slider, or the scrollbar on the right edge; after a scroll step the wheel keeps
+scrolling for 0.4 s (`U.scroll_latch`), so a slider that slides under the mouse is not changed (sliders set `U.wheel_used`).
+The view is clipped with `BeginScissorMode` and the GUI is locked while the mouse is outside it (scrolled-out widgets cannot
+take clicks; a lock that was already set, e.g. by an open dropdown, is kept). The spectrum ring runs while the spectrum panel is
+drawn (`U.spectrum_shown`). Checked with posted mouse messages on a renamed dev copy: an old layout + start tab are migrated
+and autosaved, 20 wheel steps (some over sliders) changed no [fx.*] value, a tool panel dragged at the end of the scroll range.

@@ -703,7 +703,7 @@ static void test_look(void)
     /* clipboard text round trip, including a theme id and a garbage paste */
     VfLook a, b;
     vf_look_defaults(&a);
-    a.hue = -70; a.opacity = 85; a.topmost = 1; a.grid = 0; a.glow = 0; a.start_tab = 5; a.meter_warn_db = -24; a.meter_clip_db = -9;
+    a.hue = -70; a.opacity = 85; a.topmost = 1; a.grid = 0; a.glow = 0; a.start_tab = 2; a.meter_warn_db = -24; a.meter_clip_db = -9;
     a.meter_hold_s = 3.0f; a.meter_fall = 55.0f;
     snprintf(a.font_ui, sizeof a.font_ui, "verdana"); snprintf(a.font_lcd, sizeof a.font_lcd, "consola");
     a.custom[TC_ACCENT] = 0xff40c8; a.custom[TC_BG_TOP] = 0x101820;
@@ -714,7 +714,7 @@ static void test_look(void)
     vf_look_defaults(&b);
     const int got = vf_look_from_text(&b, theme, sizeof theme, text);
     CHECK(got >= 30 && !strcmp(theme, "custom"), "paste recognises %d lines, theme %s", got, theme);
-    CHECK(b.hue == -70 && b.opacity == 85 && b.topmost == 1 && b.grid == 0 && b.glow == 0 && b.scanlines == 1 && b.start_tab == 5 &&
+    CHECK(b.hue == -70 && b.opacity == 85 && b.topmost == 1 && b.grid == 0 && b.glow == 0 && b.scanlines == 1 && b.start_tab == 2 &&
           b.meter_warn_db == -24.0f && b.meter_clip_db == -9.0f && b.meter_hold_s == 3.0f && b.meter_fall == 55.0f &&
           !strcmp(b.font_ui, "verdana") && !strcmp(b.font_lcd, "consola") && b.custom[TC_ACCENT] == 0xff40c8u && b.custom[TC_BG_TOP] == 0x101820u &&
           vf_look_hidden(&b, "voice"), "every value survives the text round trip");
@@ -848,6 +848,48 @@ static void test_look_styles_layout(void)
     for (int i = 0; i < n; i++) seen[order[i]]++;
     for (int i = 0; i < n; i++) all &= seen[i] == 1;
     CHECK(all, "every effect appears exactly once in the order");
+}
+
+static void test_look_single_view(void)
+{
+    printf("look: one main view (old per-tab layouts, start tab)\n");
+    /* the panel list as the GUI builds it: effects by their old page, then the tools */
+    const char *names[] = { "highpass", "rnnoise", "limiter", "aec", "nn", "voice", "t_mix", "t_test" };
+    const int defp[8] = { 0 };
+    const int n = 8;
+    int order[8], page[8];
+
+    /* a v1.0.4.0 layout: Extra and Effects entries interleaved with Basic ones, no tools */
+    VfLook l;
+    vf_look_defaults(&l);
+    snprintf(l.layout, sizeof l.layout, "limiter:0,highpass:0,aec:1,rnnoise:0,nn:1,voice:2");
+    CHECK(vf_look_flatten_layout(&l, names, defp, n) == 1, "an old per-tab layout is rewritten");
+    CHECK(!strcmp(l.layout, "limiter:0,highpass:0,rnnoise:0,aec:0,nn:0,voice:0,t_mix:0,t_test:0"), "sorted by old page, stable, tools last (%s)", l.layout);
+    CHECK(vf_look_flatten_layout(&l, names, defp, n) == 0, "a flat layout is left alone (no sort every frame)");
+    vf_look_layout(&l, names, defp, n, order, page);
+    CHECK(order[0] == 2 && order[1] == 0 && order[2] == 1 && order[3] == 3 && order[6] == 6, "display order follows the flattened layout");
+    /* a drop across the old page boundary sticks */
+    CHECK(vf_look_move(&l, names, defp, n, 5, 0, 2) == 0 && vf_look_flatten_layout(&l, names, defp, n) == 0, "move voice in front of limiter");
+    vf_look_layout(&l, names, defp, n, order, page);
+    CHECK(order[0] == 5, "voice stays first (%s)", l.layout);
+    /* a tool can be moved like an effect */
+    CHECK(vf_look_move(&l, names, defp, n, 7, 0, 2) == 0, "move a tool in front of limiter");
+    vf_look_layout(&l, names, defp, n, order, page);
+    CHECK(order[0] == 5 && order[1] == 7 && order[2] == 2, "t_test now second (%s)", l.layout);
+    VfLook e;
+    vf_look_defaults(&e);
+    CHECK(vf_look_flatten_layout(&e, names, defp, n) == 0 && !e.layout[0], "an empty layout stays empty");
+    vf_look_set_hidden(&e, "t_mix", 1);
+    CHECK(vf_look_hidden(&e, "t_mix") && !vf_look_hidden(&e, "t_test"), "tools can be hidden");
+
+    /* start tab: values saved by v1.0.4.0 and earlier (3 tools, 4 settings, 5 look) map onto the three views */
+    VfLook s;
+    vf_look_defaults(&s);
+    vf_look_apply(&s, "start_tab", "3"); CHECK(s.start_tab == 0, "old Tools -> main view");
+    vf_look_apply(&s, "start_tab", "4"); CHECK(s.start_tab == 1, "old Settings -> settings");
+    vf_look_apply(&s, "start_tab", "5"); CHECK(s.start_tab == 2, "old Look -> look");
+    vf_look_apply(&s, "start_tab", "1"); CHECK(s.start_tab == 1, "new value kept");
+    CHECK(VF_LOOK_TABS == 3, "three views");
 }
 
 static void test_settings_ext(void)
@@ -1327,6 +1369,7 @@ int main(void)
     test_themes();
     test_look();
     test_look_styles_layout();
+    test_look_single_view();
     test_settings_ext();
     test_recorder();
     test_spectrum_and_scope();

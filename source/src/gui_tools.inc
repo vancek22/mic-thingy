@@ -7,13 +7,23 @@
 #define COMPACT_H 150
 #define HK_COUNT  (3 + VF_BOARD_SLOTS)      /* mute, ptt, bypass, board slots */
 
+enum { VF_TOOL_MIX, VF_TOOL_TEST, VF_TOOL_CAL, VF_TOOL_BOARD, VF_TOOL_QUALITY, VF_TOOL_SPECTRUM, VF_TOOL_COUNT };
+static const char *const k_tool_ids[VF_TOOL_COUNT] = { "t_mix", "t_test", "t_cal", "t_board", "t_quality", "t_spectrum" };   /* layout / hidden ids */
+
 typedef struct Ui {
-    int tab;                                /* 0..2 effect pages, 3 tools, 4 settings, 5 look */
+    int tab;                                /* 0 main view (effects + tools), 1 settings, 2 look */
     int look_sel;                           /* colour selected in the Look tab (TC_*) */
     int look_adv;                           /* Look tab: single-colour editor open */
     int drag_fx;                            /* effect panel being dragged, -1 = none */
     float drag_dx, drag_dy, drag_sx, drag_sy;
     int drag_moved;
+    int scroll_drag;                        /* scrollbar thumb held */
+    float scroll_grab;
+    float scroll;                           /* main view: pixels scrolled down */
+    double scroll_latch;                    /* until then the wheel scrolls even over a slider */
+    int wheel_used;                         /* a slider took this frame's wheel */
+    int mouse_in_view;                      /* mouse inside the visible part of the main view */
+    int spectrum_shown;                     /* the spectrum panel was drawn this frame */
     int compact;
     VfUndo undo;
     VfSnap seen, cmp_snap;
@@ -140,8 +150,11 @@ static int slider_row(Rectangle box, float *py, const char *label, float *v, flo
     Rectangle sr_ = { box.x + 14, *py + 19, box.width - 28, 10 };
     GuiSliderBar(sr_, NULL, NULL, &nv, lo, hi);
     const float wheel = GetMouseWheelMove();
-    if (on && wheel != 0 && !GuiIsLocked() && CheckCollisionPointRec(GetMousePosition(), (Rectangle){ sr_.x, sr_.y - 8, sr_.width, sr_.height + 14 }))
+    if (on && wheel != 0 && !GuiIsLocked() && vf_now_s() >= U.scroll_latch &&
+        CheckCollisionPointRec(GetMousePosition(), (Rectangle){ sr_.x, sr_.y - 8, sr_.width, sr_.height + 14 })) {
         nv += wheel * (hi - lo) / 100.0f;
+        U.wheel_used = 1;
+    }
     if (nv < lo) nv = lo;
     if (nv > hi) nv = hi;
     *py += 34;
@@ -235,17 +248,17 @@ static void spectrum_panel(Rectangle box)
     text(F.lcd, "10k", r.x + 2 + w * logf(10000.0f / f_lo) / logf(f_hi / f_lo) - 10, r.y + r.height - 16, C_DISABLED);
 }
 
-static void draw_tools(Rectangle area, VfSession *s, VfSettings *st, int sel_mode, int sel_out, int sel_mon)
+/* One tool panel (k = VF_TOOL_*) in box; the main view places them like the effect panels. */
+static void draw_tool(int k, Rectangle box, VfSession *s, VfSettings *st, int sel_mode, int sel_out, int sel_mon)
 {
-    const float pw = 292, ph = 276;
+    const float ph = 276;
     char t[160];
-    Rectangle box;
+    float py;
     const int running = s->running;
 
-    /* --- 1: monitor and mix --- */
-    box = (Rectangle){ area.x, area.y, pw, ph };
+    if (k == VF_TOOL_MIX) {
     panel(box, tr(S_PN_MIX), -1);
-    float py = box.y + 36;
+    py = box.y + 36;
     const int mon_mode = sel_mode == VF_OUT_VMIC_MONITOR;
     int on = mon_mode;
     if (!on) GuiDisable();
@@ -269,8 +282,8 @@ static void draw_tools(Rectangle area, VfSession *s, VfSettings *st, int sel_mod
 #endif
     (void)sel_out; (void)sel_mon;
 
-    /* --- 2: test and record --- */
-    box = (Rectangle){ area.x + (pw + 6), area.y, pw, ph };
+    }
+    if (k == VF_TOOL_TEST) {
     panel(box, tr(S_PN_TEST), U.ab.state == VF_AB_RECORDING || vf_rec_active(&U.rec) ? 0 : -1);
     py = box.y + 36;
     const VfAbState abs_ = (VfAbState)atomic_load(&U.ab.state);
@@ -318,8 +331,8 @@ static void draw_tools(Rectangle area, VfSession *s, VfSettings *st, int sel_mod
     if (recording) { snprintf(t, sizeof t, tr(S_REC_FMT), vf_rec_seconds(&U.rec)); text(F.lcd, t, box.x + 14, py, C_BURG_HI); }
     else text(F.ui, tr(S_REC_NOTE), box.x + 14, py, C_DISABLED);
 
-    /* --- 3: calibration --- */
-    box = (Rectangle){ area.x + 2 * (pw + 6), area.y, pw, ph };
+    }
+    if (k == VF_TOOL_CAL) {
     panel(box, tr(S_PN_CAL), (U.cal.state == VF_CAL_SILENCE || U.cal.state == VF_CAL_SPEECH) ? 0 : -1);
     py = box.y + 36;
     const int cal_busy = U.cal.state == VF_CAL_SILENCE || U.cal.state == VF_CAL_SPEECH;
@@ -362,8 +375,8 @@ static void draw_tools(Rectangle area, VfSession *s, VfSettings *st, int sel_mod
         }
     }
 
-    /* --- 4: soundboard --- */
-    box = (Rectangle){ area.x, area.y + (ph + 6), pw, ph };
+    }
+    if (k == VF_TOOL_BOARD) {
     panel(box, tr(S_PN_BOARD), -1);
     py = box.y + 36;
     const Vector2 mouse = GetMousePosition();
@@ -379,7 +392,7 @@ static void draw_tools(Rectangle area, VfSession *s, VfSettings *st, int sel_mod
         }
         if (!has) GuiEnable();
         if (has && GuiButton((Rectangle){ b.x + 110, b.y, 18, 26 }, "x")) { vf_board_clear(&s->board, i); st->board_path[i][0] = '\0'; }
-        if (CheckCollisionPointRec(mouse, b) && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && has) {   /* assign a hotkey */
+        if (U.mouse_in_view && CheckCollisionPointRec(mouse, b) && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && has) {   /* assign a hotkey */
             U.hk_capture = 3 + i;
             U.hk_wait_release = 1;
             note_set("%s", tr(S_HK_PRESS));
@@ -406,8 +419,8 @@ static void draw_tools(Rectangle area, VfSession *s, VfSettings *st, int sel_mod
     }
     text(F.ui, tr(S_BOARD_HINT), box.x + 12, py + 30, C_DISABLED);
 
-    /* --- 5: quality and dropout history --- */
-    box = (Rectangle){ area.x + (pw + 6), area.y + (ph + 6), pw, ph };
+    }
+    if (k == VF_TOOL_QUALITY) {
     panel(box, tr(S_PN_QUALITY), -1);
     py = box.y + 36;
     VfQualityInfo q;
@@ -438,10 +451,12 @@ static void draw_tools(Rectangle area, VfSession *s, VfSettings *st, int sel_mod
         DrawRectangle((int)(hr.x + 2 + i * bw), (int)(hr.y + hr.height - 4 - hgt), (int)bw - 1, hist[i] ? (int)hgt + 1 : 1, hist[i] ? C_AMBER : C_SEG_OFF);
     }
 
-    /* --- 6: spectrum --- */
-    box = (Rectangle){ area.x + 2 * (pw + 6), area.y + (ph + 6), pw, ph };
+    }
+    if (k == VF_TOOL_SPECTRUM) {
     panel(box, tr(S_PN_SPECTRUM), -1);
     spectrum_panel(box);
+    U.spectrum_shown = 1;
+    }
 }
 
 /* ---- settings tab ---- */
@@ -798,7 +813,7 @@ static void ui_tick(VfSession *s, double now, int running_window, UiLink *L)
     /* spectrum feed only while it is visible */
     const int howl_on = st->howl_guard && s->running && s->has_mon && U.scope_ready;
     const int cal_audio = U.cal.state == VF_CAL_SILENCE || U.cal.state == VF_CAL_SPEECH;
-    const int want_scope = ((running_window && !U.compact && U.tab == 3) || howl_on || cal_audio) && U.scope_ready;
+    const int want_scope = ((running_window && !U.compact && U.tab == 0 && U.spectrum_shown) || howl_on || cal_audio) && U.scope_ready;
     if (want_scope) {
         if (atomic_load(&s->pipe.scope_ring) != &U.scope) atomic_store(&s->pipe.scope_ring, &U.scope);
         float blk[2 * VF_FRAME_SIZE];

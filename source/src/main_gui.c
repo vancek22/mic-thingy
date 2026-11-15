@@ -661,6 +661,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--demo")) demo = 1;
         else if (!strcmp(argv[i], "--tab") && i + 1 < argc) tab_arg = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--cal-demo") && i + 1 < argc) cal_demo = atoi(argv[++i]);   /* screenshots of the wizard */
+        else if (!strcmp(argv[i], "--scroll") && i + 1 < argc) U.scroll = (float)atof(argv[++i]);   /* screenshots of the lower rows */
         else if (!strcmp(argv[i], "--after-update") && i + 1 < argc) after_update = strtoul(argv[++i], NULL, 10);
     }
 
@@ -721,7 +722,7 @@ int main(int argc, char **argv)
     int sel_lang = (int)vf_i18n_get();
     int edit_in = 0, edit_out = 0, edit_preset = 0, edit_name = 0;
     U.drag_fx = -1;
-    U.tab = tab_arg >= 0 && tab_arg < VF_LOOK_TABS ? tab_arg : st.look.start_tab;   /* 0..2 effect pages, 3 tools, 4 settings, 5 look (--tab N for screenshots) */
+    U.tab = tab_arg >= 0 && tab_arg < VF_LOOK_TABS ? tab_arg : st.look.start_tab;   /* 0 main view, 1 settings, 2 look (--tab N for screenshots) */
     if (cal_demo == VF_CAL_SPEECH || cal_demo == VF_CAL_DONE) {          /* --cal-demo 2|3: layout check of the wizard */
         vf_cal_start(&U.cal);
         U.cal.state = (VfCalState)cal_demo;
@@ -1124,35 +1125,62 @@ int main(int argc, char **argv)
         snprintf(t, sizeof t, tr(S_DROPOUTS_FMT), vf_session_xruns(&s));
         text(F.lcd, t, mx, y, vf_session_xruns(&s) ? C_AMBER : C_TEXT_DIM);
 
-        /* ---- effect panels: 3 columns x 2 rows, built from the parameter tables ---- */
+        /* ---- tabs: the main view (every effect and tool panel), settings, look ---- */
         GuiToggleGroup((Rectangle){ 282, TOP, 120, 24 }, tr(S_TABS_ALL), &U.tab);
-        if (U.tab == 3) draw_tools((Rectangle){ 282, TOP + 30, 0, 0 }, &s, &st, sel_mode, sel_out, sel_mon);
-        else if (U.tab == 4) draw_settings((Rectangle){ 282, TOP + 30, 0, 0 }, &s, &st, presets, n_presets, &sel_preset, tray_ok);
-        else if (U.tab == 5) draw_look((Rectangle){ 282, TOP + 30, 0, 0 }, &s, &st);
-        int slot = 0;
-        /* panel order and page come from the Look layout: a panel is dragged by its title strip */
-        const char *fx_names[VF_MAX_FX];
-        int fx_defp[VF_MAX_FX], fx_ord[VF_MAX_FX], fx_pg[VF_MAX_FX];
-        const int nfx = s.pipe.count;
-        for (int q = 0; q < nfx; q++) { fx_names[q] = s.pipe.fx[q]->name; fx_defp[q] = s.pipe.fx[q]->page; }
-        vf_look_layout(&st.look, fx_names, fx_defp, nfx, fx_ord, fx_pg);
-        if (U.drag_fx >= 0) GuiLock();                         /* no slider grabs the mouse while a panel is carried */
-        for (int oi = 0; oi < nfx && U.tab <= 2; oi++) {
-            const int i = fx_ord[oi];
-            Fx *fx = s.pipe.fx[i];
-            if (fx_pg[i] != U.tab || vf_look_hidden(&st.look, fx->name) || slot >= 6) continue;   /* hidden = not drawn, still running */
-            const float pw = 292, ph = 276;
-            Rectangle box = { 282 + (slot % 3) * (pw + 6), TOP + 30 + (slot / 3) * (ph + 6), pw, ph };
-            slot++;
-            bool on = !atomic_load(&fx->bypass);
-            panel(box, tr_fx(fx->name), !on ? 0 : (s.running && !atomic_load(&s.pipe.bypass_all)) ? 1 : 2);
-            if (U.drag_fx == i) DrawRectangleRec(box, Fade(C_BG_BOTTOM, 0.6f));   /* the carried panel's old place */
-            if (U.drag_fx < 0 && !GuiIsLocked() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+        if (U.tab == 1) draw_settings((Rectangle){ 282, TOP + 30, 0, 0 }, &s, &st, presets, n_presets, &sel_preset, tray_ok);
+        else if (U.tab == 2) draw_look((Rectangle){ 282, TOP + 30, 0, 0 }, &s, &st);
+        /* ---- main view: one scrolling 3-column grid; order from the Look layout, panels dragged by their title ---- */
+        const char *pn_names[VF_MAX_FX + VF_TOOL_COUNT];
+        int pn_fx[VF_MAX_FX + VF_TOOL_COUNT], pn_defp[VF_MAX_FX + VF_TOOL_COUNT], pn_ord[VF_MAX_FX + VF_TOOL_COUNT],
+            pn_pg[VF_MAX_FX + VF_TOOL_COUNT], pn_vis[VF_MAX_FX + VF_TOOL_COUNT];
+        int np = 0, nvis = 0;
+        for (int pg_ = 0; pg_ < VF_LOOK_PAGES; pg_++)              /* default order: the old Basic, Extra, Effects pages */
+            for (int q = 0; q < s.pipe.count; q++)
+                if (s.pipe.fx[q]->page == pg_ || (pg_ == VF_LOOK_PAGES - 1 && s.pipe.fx[q]->page >= VF_LOOK_PAGES)) {
+                    pn_names[np] = s.pipe.fx[q]->name; pn_fx[np] = q; pn_defp[np] = 0; np++;
+                }
+        for (int k = 0; k < VF_TOOL_COUNT; k++) { pn_names[np] = k_tool_ids[k]; pn_fx[np] = -1 - k; pn_defp[np] = 0; np++; }
+        if (vf_look_flatten_layout(&st.look, pn_names, pn_defp, np)) { /* an old per-tab layout became one list */ }
+        vf_look_layout(&st.look, pn_names, pn_defp, np, pn_ord, pn_pg);
+        for (int oi = 0; oi < np; oi++)
+            if (!vf_look_hidden(&st.look, pn_names[pn_ord[oi]])) pn_vis[nvis++] = pn_ord[oi];
+        const float pw = 292, ph = 276;
+        const Rectangle view = { 282, TOP + 30, WIN_W - 282 - 10, WIN_H - 27 - (TOP + 30) - 2 };
+        const float content_h = (float)((nvis + 2) / 3) * (ph + 6) - 6;
+        const float max_scroll = content_h > view.height ? content_h - view.height : 0;
+        if (U.drag_fx >= 0) {                                   /* carrying a panel near an edge scrolls the view */
+            if (mouse.y < view.y + 30) U.scroll -= 14;
+            else if (mouse.y > view.y + view.height - 30) U.scroll += 14;
+        }
+        U.scroll = U.scroll < 0 ? 0 : U.scroll > max_scroll ? max_scroll : U.scroll;
+        U.mouse_in_view = CheckCollisionPointRec(mouse, view);
+        U.wheel_used = 0;
+        U.spectrum_shown = 0;
+        const bool grid_was_locked = GuiIsLocked();
+        if (U.tab == 0) {
+            if (U.drag_fx >= 0 || !U.mouse_in_view) GuiLock();  /* widgets scrolled out of sight must not take clicks */
+            BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
+        }
+        for (int vi = 0; vi < nvis && U.tab == 0; vi++) {
+            const int id = pn_vis[vi];
+            Rectangle box = { 282 + (float)(vi % 3) * (pw + 6), view.y + (float)(vi / 3) * (ph + 6) - U.scroll, pw, ph };
+            if (box.y > view.y + view.height || box.y + ph < view.y) continue;   /* fully out of sight */
+            if (U.drag_fx < 0 && !GuiIsLocked() && U.mouse_in_view && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
                 CheckCollisionPointRec(mouse, (Rectangle){ box.x + 4, box.y + 4, box.width - 140, 24 })) {
-                U.drag_fx = i;                                  /* title strip left of ON/OFF and Reset */
+                U.drag_fx = id;                                 /* title strip left of ON/OFF and Reset */
                 U.drag_dx = mouse.x - box.x; U.drag_dy = mouse.y - box.y;
                 U.drag_sx = mouse.x; U.drag_sy = mouse.y; U.drag_moved = 0;
             }
+            if (pn_fx[id] < 0) {                                /* a tool panel */
+                draw_tool(-1 - pn_fx[id], box, &s, &st, sel_mode, sel_out, sel_mon);
+                if (U.drag_fx == id) DrawRectangleRec(box, Fade(C_BG_BOTTOM, 0.6f));
+                continue;
+            }
+            const int i = pn_fx[id];
+            Fx *fx = s.pipe.fx[i];
+            bool on = !atomic_load(&fx->bypass);
+            panel(box, tr_fx(fx->name), !on ? 0 : (s.running && !atomic_load(&s.pipe.bypass_all)) ? 1 : 2);
+            if (U.drag_fx == id) DrawRectangleRec(box, Fade(C_BG_BOTTOM, 0.6f));   /* the carried panel's old place */
             GuiSetStyle(DEFAULT, TEXT_SIZE, 14);
             GuiSetFont(F.bold);
             const bool non = onoff((Rectangle){ box.x + box.width - 128, box.y + 6, 44, 20 }, on, "ON", "OFF");
@@ -1219,8 +1247,9 @@ int main(int argc, char **argv)
                 GuiSliderBar(sr_, NULL, NULL, &nv, pi->min, pi->max);
                 /* mouse wheel over a slider: fine steps (Shift = 10x finer) */
                 const float wheel = GetMouseWheelMove();
-                if (on && wheel != 0 && !GuiIsLocked() &&
+                if (on && wheel != 0 && !GuiIsLocked() && vf_now_s() >= U.scroll_latch &&
                     CheckCollisionPointRec(mouse, (Rectangle){ sr_.x, sr_.y - 8, sr_.width, sr_.height + 14 })) {
+                    U.wheel_used = 1;
                     float step = (pi->max - pi->min) / 100.0f;
                     if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) step /= 10.0f;
                     if (ints && step < 1.0f) step = 1.0f;
@@ -1234,7 +1263,34 @@ int main(int argc, char **argv)
             }
             GuiEnable();
         }
-        if (U.drag_fx >= 0) drag_panel(&st, mouse, fx_names, fx_defp, fx_ord, fx_pg, nfx);
+        if (U.tab == 0) {
+            EndScissorMode();
+            if (!grid_was_locked) GuiUnlock();
+            /* scrollbar on the right edge (drag the thumb or use the wheel anywhere but on a slider) */
+            if (max_scroll > 0) {
+                const Rectangle track = { view.x + view.width + 3, view.y, 6, view.height };
+                const float th_h = fmaxf(30.0f, track.height * view.height / content_h);
+                const Rectangle thumb = { track.x, track.y + (track.height - th_h) * (U.scroll / max_scroll), track.width, th_h };
+                DrawRectangleRec(track, C_LCD_BG);
+                DrawRectangleRec(thumb, U.scroll_drag ? C_NEON : mixc(C_NEON, C_LCD_BG, 0.45f));
+                if (!GuiIsLocked() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+                    CheckCollisionPointRec(mouse, (Rectangle){ track.x - 4, track.y, track.width + 8, track.height })) {
+                    U.scroll_drag = 1;
+                    U.scroll_grab = CheckCollisionPointRec(mouse, thumb) ? mouse.y - thumb.y : th_h / 2;
+                }
+                if (U.scroll_drag) {
+                    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) U.scroll_drag = 0;
+                    else U.scroll = (mouse.y - U.scroll_grab - track.y) / (track.height - th_h) * max_scroll;
+                }
+                const float wheel = GetMouseWheelMove();
+                if (wheel != 0 && U.mouse_in_view && !U.wheel_used && !GuiIsLocked()) {
+                    U.scroll -= wheel * 90.0f;
+                    U.scroll_latch = vf_now_s() + 0.4;          /* keep scrolling when a slider slides under the mouse */
+                }
+                U.scroll = U.scroll < 0 ? 0 : U.scroll > max_scroll ? max_scroll : U.scroll;
+            }
+            if (U.drag_fx >= 0) drag_panel(&st, mouse, view, pn_names, pn_defp, np, pn_vis, nvis);
+        }
 
         /* ---- status bar: LCD strip ---- */
         char sb[600];

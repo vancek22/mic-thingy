@@ -12,7 +12,7 @@
 #include "util/ini.h"
 
 #define VF_LOOK_HIDDEN_MAX 192
-#define VF_LOOK_TABS 6                     /* basic, extra, effects, tools, settings, look */
+#define VF_LOOK_TABS 3                     /* main view (effects + tools), settings, look */
 #define VF_LOOK_LAYOUT_MAX 512
 #define VF_LOOK_PAGES 3                    /* effect pages that hold panels (basic, extra, effects) */
 
@@ -53,6 +53,9 @@ void     vf_rgb_hsv(unsigned rgb, float *h_deg, float *s, float *v);
  * and rewrites l->layout; 0 = ok. */
 int  vf_look_layout(const VfLook *l, const char *const *names, const int *def_page, int n, int *order, int *page);
 int  vf_look_move(VfLook *l, const char *const *names, const int *def_page, int n, int fx, int to_page, int before_fx);
+/* A layout saved by v1.0.4.0 (one list, entries "name:page" with pages 0..2 = the old Basic / Extra / Effects tabs) is
+ * rewritten once for the single main view: sorted by its old page (stable), every page 0. 1 = rewritten. */
+int  vf_look_flatten_layout(VfLook *l, const char *const *names, const int *def_page, int n);
 
 void vf_look_defaults(VfLook *l);
 /* One key = value; clamps and validates. 1 = key known (and value usable), 0 = ignored. */

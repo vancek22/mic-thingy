@@ -136,7 +136,11 @@ int vf_look_apply(VfLook *l, const char *key, const char *value)
     if (!strcmp(key, "grid")) { l->grid = truthy(value); return 1; }
     if (!strcmp(key, "scanlines")) { l->scanlines = truthy(value); return 1; }
     if (!strcmp(key, "glow")) { l->glow = truthy(value); return 1; }
-    if (!strcmp(key, "start_tab")) { l->start_tab = clampi(atoi(value), 0, VF_LOOK_TABS - 1); return 1; }
+    if (!strcmp(key, "start_tab")) {                            /* up to v1.0.4.0: 0..3 effect / tool tabs, 4 settings, 5 look */
+        const int v = atoi(value);
+        l->start_tab = clampi(v == 3 ? 0 : v == 4 ? 1 : v == 5 ? 2 : v, 0, VF_LOOK_TABS - 1);
+        return 1;
+    }
     if (!strcmp(key, "font_ui") || !strcmp(key, "font_lcd")) {
         if (!id_ok(value)) return 0;
         snprintf(key[5] == 'u' ? l->font_ui : l->font_lcd, 24, "%s", value);
@@ -475,4 +479,31 @@ int vf_look_move(VfLook *l, const char *const *names, const int *def_page, int n
     }
     snprintf(l->layout, sizeof l->layout, "%s", buf);
     return 0;
+}
+
+int vf_look_flatten_layout(VfLook *l, const char *const *names, const int *def_page, int n)
+{
+    if (!strchr(l->layout, ':')) return 0;
+    int has_page = 0;
+    for (const char *p = strchr(l->layout, ':'); p; p = strchr(p + 1, ':'))
+        if (p[1] != '0') has_page = 1;
+    if (!has_page) return 0;
+    /* the stored order with the page of every entry, read with the built-in pages of the old per-tab layout */
+    (void)def_page;
+    int order[64], page[64], last[64];
+    if (n > 64) n = 64;
+    for (int i = 0; i < n; i++) last[i] = VF_LOOK_PAGES - 1;    /* panels the old layout did not list (tools) go last */
+    vf_look_layout(l, names, last, n, order, page);
+    char buf[VF_LOOK_LAYOUT_MAX];
+    size_t used = 0;
+    buf[0] = '\0';
+    for (int pg = 0; pg < VF_LOOK_PAGES; pg++)                   /* stable: by old page, then by the stored order */
+        for (int k = 0; k < n; k++) {
+            if (page[order[k]] != pg) continue;
+            const int w = snprintf(buf + used, sizeof buf - used, "%s%s:0", used ? "," : "", names[order[k]]);
+            if (w < 0 || (size_t)w >= sizeof buf - used) return 0;
+            used += (size_t)w;
+        }
+    snprintf(l->layout, sizeof l->layout, "%s", buf);
+    return 1;
 }
