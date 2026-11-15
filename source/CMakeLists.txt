@@ -108,6 +108,7 @@ add_library(vfcore STATIC
   src/util/wavio.c
   src/util/ini.c
   src/util/platform.c
+  src/util/sha256.c
   src/app/session.c
   src/app/settings.c
   src/app/i18n.c

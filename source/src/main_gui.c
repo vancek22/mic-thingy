@@ -1,6 +1,6 @@
 /* mic thingy GUI (raylib + raygui) - early-2000s "green phosphor" look.
  *
- *   mic-thingy [--autostart] [--minimized] [--mode 0|1|2] [--lang en|pl] [--in-file f.wav]
+ *   mic-thingy [--autostart] [--minimized] [--mode 0|1|2] [--lang en|pl] [--in-file f.wav] [--after-update PID]
  *               [--screenshot shot.png --frames N] [--verbose]
  *
  * The audio runs on miniaudio's thread; this thread only writes parameters
@@ -551,6 +551,7 @@ int main(int argc, char **argv)
 {
     vf_harden_process();
     int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0, demo = 0, tab_arg = 0, cal_demo = 0;
+    unsigned long after_update = 0;
     const char *in_file = NULL, *shot = NULL, *lang_arg = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--autostart")) autostart = 1;
@@ -564,11 +565,17 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--demo")) demo = 1;
         else if (!strcmp(argv[i], "--tab") && i + 1 < argc) tab_arg = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--cal-demo") && i + 1 < argc) cal_demo = atoi(argv[++i]);   /* screenshots of the wizard */
+        else if (!strcmp(argv[i], "--after-update") && i + 1 < argc) after_update = strtoul(argv[++i], NULL, 10);
     }
+
+    /* Started by "Restart now" after an in-place update: the old process is still shutting down and holds the
+     * single-instance lock, so wait for it to end first. */
+    if (after_update) vf_wait_pid(after_update, 15000);
 
     /* One mic thingy at a time: a second launch (e.g. autostart + manual) would
      * open the microphone twice and feed the virtual mic twice. */
     if (!shot && !vf_single_instance()) return 0;     /* the running one shows its window */
+    if (!shot) vf_update_cleanup();                   /* <exe>.old of a finished update, unfinished downloads */
 
     static VfSession s;
     int init_ok = vf_session_init(&s, 1) == 0;
@@ -674,6 +681,8 @@ int main(int argc, char **argv)
         const double now_t = vf_now_s();
         const float dt = last_t > 0 ? (float)(now_t - last_t) : 0.016f;
         last_t = now_t;
+
+        if (g_restart_req) quit = 1;                /* update installed, the new program is already starting */
 
         /* ---- window close button: hide to tray in background mode, else quit ---- */
         if (g_win_open && WindowShouldClose()) {

@@ -315,3 +315,16 @@ mic-thingy-file, per noise family). Datasets/checkpoints/audio stay out of git. 
 GUI pages: Extra = aec, hum, nn, dereverb, breath, guard; Effects = agc, deesser, warmth, voice (6 panels per page max -
 the de-esser had been invisible before).
 Start-menu copy: also refreshed when the size differs (an older-timestamped release zip no longer leaves the old copy).
+
+## In-place update (2026-11-15)
+"Update now" (Settings -> About, shown after "Check for updates" found a newer tag) replaces the running program without a
+browser or zip (`app/update.[ch]`): downloads `releases/download/<tag>/mic-thingy.exe` (Linux `mic-thingy-linux`) as
+`<exe>.new` plus `<file>.sha256`, checks size (256 KB..64 MB), file type (MZ / ELF) and SHA-256, swaps it in
+(`vf_swap_file`: Windows renames the running exe to `<exe>.old`, which the next start deletes; Linux rename over it) and
+"Restart now" starts `<exe> --after-update <pid>`, which waits for the old process (single-instance lock) before running.
+Failure leaves the old program untouched; releases without those assets (<= v1.0.1) give `VF_UPD_NO_PACKAGE` and the page
+button. The two assets are uploaded by `.github/workflows/release.yml`. The checksum is from the same release: it guards
+against damaged downloads, not a compromised GitHub account. The download still transfers the whole program file (~4.7 MB,
+no binary delta). Tests: `test_app` ("in-place update helpers": SHA-256 vectors, verify, swap); the real WinHTTP download
+was checked against a public release asset (redirect, progress, 404, size cap), the swap against a really running exe.
+`util/sha256.[ch]` is the SHA-256. Linux (curl + fork/exec) is written but never compiled here.

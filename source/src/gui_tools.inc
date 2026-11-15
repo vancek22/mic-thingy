@@ -447,6 +447,7 @@ static const char *hk_row_label(int i)
 }
 
 static VfUpdate g_upd;                              /* "check for updates" state */
+static int g_restart_req;                           /* the update was installed and the new program started: quit */
 
 static void draw_settings(Rectangle area, VfSession *s, VfSettings *st, VfPresetInfo *presets, int n_presets, int *sel_preset, int tray_ok)
 {
@@ -622,7 +623,8 @@ static void draw_settings(Rectangle area, VfSession *s, VfSettings *st, VfPreset
     py += 26;
     {   /* check for updates: contacts github.com only on click */
         const int us = vf_update_state(&g_upd);
-        if (GuiButton((Rectangle){ box.x + 14, py, box.width - 28, 26 }, tr(S_UPD_CHECK)) && us != VF_UPD_CHECKING) vf_update_check(&g_upd);
+        const int busy = us == VF_UPD_CHECKING || us == VF_UPD_DOWNLOADING;
+        if (GuiButton((Rectangle){ box.x + 14, py, box.width - 28, 26 }, tr(S_UPD_CHECK)) && !busy && us != VF_UPD_READY) vf_update_check(&g_upd);
         py += 32;
         char ut[96] = "";
         Color uc = C_TEXT_DIM;
@@ -631,10 +633,27 @@ static void draw_settings(Rectangle area, VfSession *s, VfSettings *st, VfPreset
         else if (us == VF_UPD_NEWER) { snprintf(ut, sizeof ut, tr(S_UPD_NEWER_FMT), g_upd.tag); uc = C_AMBER; }
         else if (us == VF_UPD_NO_RELEASE) snprintf(ut, sizeof ut, "%s", tr(S_UPD_NONE));
         else if (us == VF_UPD_ERROR) { snprintf(ut, sizeof ut, "%s", tr(S_UPD_ERROR)); uc = C_RED; }
+        else if (us == VF_UPD_DOWNLOADING) {
+            const long tot = atomic_load(&g_upd.total), got = atomic_load(&g_upd.got);
+            if (tot > 0) snprintf(ut, sizeof ut, tr(S_UPD_DOWNLOADING_FMT), g_upd.tag, (int)(100 * got / tot));
+            else snprintf(ut, sizeof ut, "%s", tr(S_UPD_DOWNLOADING));
+            uc = C_AMBER;
+        }
+        else if (us == VF_UPD_READY) { snprintf(ut, sizeof ut, tr(S_UPD_READY_FMT), g_upd.tag); uc = C_NEON; }
+        else if (us == VF_UPD_NO_PACKAGE) { snprintf(ut, sizeof ut, "%s", tr(S_UPD_NOPKG)); uc = C_AMBER; }
+        else if (us == VF_UPD_FAIL) { snprintf(ut, sizeof ut, "%s", tr(S_UPD_FAIL)); uc = C_RED; }
         else snprintf(ut, sizeof ut, "%s", tr(S_UPD_NOTE));
         text_fit(F.ui, ut, box.x + 14, py, 13, box.width - 28, us == VF_UPD_IDLE ? C_DISABLED : uc);
         py += 22;
-        if (us == VF_UPD_NEWER && GuiButton((Rectangle){ box.x + 14, py, box.width - 28, 26 }, tr(S_UPD_OPEN))) vf_update_open_page(&g_upd);
+        if (us == VF_UPD_READY) {
+            if (GuiButton((Rectangle){ box.x + 14, py, box.width - 28, 26 }, tr(S_UPD_RESTART)) && vf_update_restart() == 0) g_restart_req = 1;
+        } else if (us == VF_UPD_NEWER) {                     /* update in place, or just look at the release */
+            const float hw = (box.width - 34) / 2;
+            if (GuiButton((Rectangle){ box.x + 14, py, hw, 26 }, tr(S_UPD_INSTALL))) vf_update_install(&g_upd);
+            if (GuiButton((Rectangle){ box.x + 20 + hw, py, hw, 26 }, tr(S_UPD_OPEN))) vf_update_open_page(&g_upd);
+        } else if (us == VF_UPD_NO_PACKAGE || us == VF_UPD_FAIL) {
+            if (GuiButton((Rectangle){ box.x + 14, py, box.width - 28, 26 }, tr(S_UPD_OPEN))) vf_update_open_page(&g_upd);
+        }
     }
     (void)sel_preset;
 }

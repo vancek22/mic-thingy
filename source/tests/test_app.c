@@ -13,6 +13,7 @@
 #include "app/hotkeys.h"
 #include "app/howl.h"
 #include "app/update.h"
+#include "util/sha256.h"
 #include "app/recorder.h"
 #include "app/settings.h"
 #include "app/soundboard.h"
@@ -966,6 +967,87 @@ static void test_update(void)
     CHECK(vf_update_parse("{\"tag_name\":\"v1.2.3", tag, sizeof tag) != 0, "unterminated");
     CHECK(vf_update_page_url("v1.2.3", url, sizeof url) == 0 && !strcmp(url, "https://github.com/vancek22/mic-thingy/releases/tag/v1.2.3"), "page url '%s'", url);
     CHECK(vf_update_page_url("v1?x=1", url, sizeof url) != 0, "url injection rejected");
+
+    printf("in-place update helpers\n");
+    char path[300], hex[65];
+    CHECK(vf_update_asset_path("v1.2.3", "mic-thingy.exe", path, sizeof path) == 0 &&
+          !strcmp(path, "/vancek22/mic-thingy/releases/download/v1.2.3/mic-thingy.exe"), "asset path '%s'", path);
+    CHECK(vf_update_asset_path("v1/../x", "mic-thingy.exe", path, sizeof path) != 0, "bad tag rejected");
+    CHECK(vf_update_asset_path("v1.2.3", "../evil", path, sizeof path) != 0, "bad asset name rejected");
+    CHECK(vf_update_asset_path("v1.2.3", "mic-thingy.exe", path, 20) != 0, "too small buffer rejected");
+
+    uint8_t dg[32];
+    vf_sha256("abc", 3, dg);
+    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", dg[i]);
+    CHECK(!strcmp(hex, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"), "sha256(abc) = %s", hex);
+    vf_sha256("", 0, dg);
+    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", dg[i]);
+    CHECK(!strcmp(hex, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"), "sha256(empty) = %s", hex);
+    {   /* one million 'a' (FIPS 180 test vector): many blocks, through the file reader */
+        const char *fn = "vf_test_upd_sha.bin";
+        FILE *f = fopen(fn, "wb");
+        for (int i = 0; i < 1000; i++) { char blk[1000]; memset(blk, 'a', sizeof blk); fwrite(blk, 1, sizeof blk, f); }
+        fclose(f);
+        CHECK(vf_sha256_file(fn, hex) == 0 && !strcmp(hex, "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"),
+              "sha256(1M x a) = %s", hex);
+        CHECK(vf_sha256_file("vf_test_no_such_file.bin", hex) != 0, "missing file reported");
+        remove(fn);
+    }
+
+    CHECK(vf_update_parse_sha("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  mic-thingy.exe\n", hex) == 0 &&
+          !strcmp(hex, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"), "parse sha256sum line");
+    CHECK(vf_update_parse_sha("BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD\r\n", hex) == 0 && hex[0] == 'b', "upper case -> lower");
+    CHECK(vf_update_parse_sha("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015a", hex) != 0, "63 digits rejected");
+    CHECK(vf_update_parse_sha("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad0", hex) != 0, "65 digits rejected");
+    CHECK(vf_update_parse_sha("<html>Not Found</html>", hex) != 0, "html page rejected");
+
+    {   /* verify + swap on real files: a fake program (right magic, 300 KB) */
+        const char *np = "vf_test_upd_new.bin", *tg = "vf_test_upd_target.bin", *old = "vf_test_upd_target.bin.old";
+        static unsigned char img[300 * 1024];
+        memset(img, 0x5a, sizeof img);
+#ifdef _WIN32
+        img[0] = 'M'; img[1] = 'Z';
+#else
+        img[0] = 0x7f; img[1] = 'E'; img[2] = 'L'; img[3] = 'F';
+#endif
+        FILE *f = fopen(np, "wb");
+        fwrite(img, 1, sizeof img, f);
+        fclose(f);
+        CHECK(vf_sha256_file(np, hex) == 0, "hash of the fake program");
+        CHECK(vf_update_verify(np, hex) == 0, "verify accepts the right program");
+        char bad[65];
+        memcpy(bad, hex, 65);
+        bad[10] = bad[10] == '0' ? '1' : '0';
+        CHECK(vf_update_verify(np, bad) != 0, "verify rejects a wrong checksum");
+        CHECK(vf_update_verify(np, "abc") != 0, "verify rejects a short checksum");
+        CHECK(vf_update_verify("vf_test_no_such_file.bin", hex) != 0, "verify rejects a missing file");
+        img[0] = 'X';
+        f = fopen("vf_test_upd_junk.bin", "wb");
+        fwrite(img, 1, sizeof img, f);
+        fclose(f);
+        char jh[65];
+        vf_sha256_file("vf_test_upd_junk.bin", jh);
+        CHECK(vf_update_verify("vf_test_upd_junk.bin", jh) != 0, "verify rejects a file that is not a program");
+        remove("vf_test_upd_junk.bin");
+        f = fopen("vf_test_upd_small.bin", "wb");
+        fwrite(img, 1, 1000, f);
+        fclose(f);
+        vf_sha256_file("vf_test_upd_small.bin", jh);
+        CHECK(vf_update_verify("vf_test_upd_small.bin", jh) != 0, "verify rejects a tiny file");
+        remove("vf_test_upd_small.bin");
+
+        f = fopen(tg, "wb");
+        fputs("old program", f);
+        fclose(f);
+        CHECK(vf_swap_file(np, tg) == 0, "swap onto the existing target");
+        CHECK(vf_sha256_file(tg, jh) == 0 && !strcmp(jh, hex), "target now holds the new program");
+        FILE *g = fopen(np, "rb");
+        CHECK(g == NULL, "the .new file is gone after the swap");
+        if (g) fclose(g);
+        remove(tg);
+        remove(old);
+        CHECK(vf_swap_file("vf_test_no_such_file.bin", tg) != 0, "swap of a missing file fails");
+    }
 }
 
 static void test_hardening(void)

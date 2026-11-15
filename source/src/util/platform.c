@@ -57,6 +57,52 @@ int vf_replace_file(const char *tmp, const char *dst)
     return MoveFileExW(a, b, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) ? 0 : -1;
 }
 
+/* Puts `newf` in place of `target`, which may be the running program: Windows lets a running .exe be renamed but not
+ * overwritten, so the old file goes to <target>.old first (deleted by the next start) and is restored if the move fails. */
+int vf_swap_file(const char *newf, const char *target)
+{
+    wchar_t a[VF_PATH_MAX], b[VF_PATH_MAX], old[VF_PATH_MAX + 8];
+    if (to_w(newf, a, VF_PATH_MAX) || to_w(target, b, VF_PATH_MAX)) return -1;
+    if ((size_t)swprintf(old, VF_PATH_MAX + 8, L"%ls.old", b) >= VF_PATH_MAX + 8) return -1;
+    DeleteFileW(old);
+    const int had = GetFileAttributesW(b) != INVALID_FILE_ATTRIBUTES;
+    if (had && !MoveFileExW(b, old, MOVEFILE_REPLACE_EXISTING)) return -1;
+    if (!MoveFileExW(a, b, 0)) {
+        if (had) MoveFileExW(old, b, MOVEFILE_REPLACE_EXISTING);
+        return -1;
+    }
+    return 0;
+}
+
+unsigned long vf_current_pid(void) { return (unsigned long)GetCurrentProcessId(); }
+
+int vf_wait_pid(unsigned long pid, int timeout_ms)
+{
+    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)pid);
+    if (!h) return 0;                                   /* already gone */
+    const DWORD r = WaitForSingleObject(h, (DWORD)timeout_ms);
+    CloseHandle(h);
+    return r == WAIT_OBJECT_0 ? 0 : -1;
+}
+
+int vf_spawn_after_update(const char *exe, unsigned long wait_pid)
+{
+    wchar_t w[VF_PATH_MAX], dir[VF_PATH_MAX], cmd[VF_PATH_MAX + 48];
+    if (to_w(exe, w, VF_PATH_MAX)) return -1;
+    if ((size_t)swprintf(cmd, VF_PATH_MAX + 48, L"\"%ls\" --after-update %lu", w, wait_pid) >= VF_PATH_MAX + 48) return -1;
+    wcscpy(dir, w);
+    wchar_t *slash = wcsrchr(dir, L'\\');
+    if (slash) *slash = 0;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof si);
+    si.cb = sizeof si;
+    if (!CreateProcessW(w, cmd, NULL, NULL, FALSE, 0, NULL, slash ? dir : NULL, &si, &pi)) return -1;
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return 0;
+}
+
 int vf_config_dir(char *out, size_t n)
 {
     const wchar_t *ov = _wgetenv(L"VF_CONFIG_DIR");
@@ -256,6 +302,7 @@ int vf_startmenu_set(int enable)
 #else
 #include <dirent.h>
 #include <errno.h>
+#include <signal.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -278,6 +325,38 @@ int vf_startmenu_set(int enable) { (void)enable; return -1; }   /* Linux: packag
 int vf_startmenu_exists(void) { return 0; }
 int vf_remove(const char *path) { return remove(path); }
 int vf_replace_file(const char *tmp, const char *dst) { return rename(tmp, dst); }
+
+/* rename() over a running executable is fine on Linux (the old inode lives on until the process exits) */
+int vf_swap_file(const char *newf, const char *target)
+{
+    chmod(newf, 0755);
+    return rename(newf, target) == 0 ? 0 : -1;
+}
+
+unsigned long vf_current_pid(void) { return (unsigned long)getpid(); }
+
+int vf_wait_pid(unsigned long pid, int timeout_ms)
+{
+    for (int waited = 0; waited <= timeout_ms; waited += 50) {
+        if (kill((pid_t)pid, 0) != 0 && errno == ESRCH) return 0;
+        usleep(50 * 1000);
+    }
+    return -1;
+}
+
+int vf_spawn_after_update(const char *exe, unsigned long wait_pid)
+{
+    char pid[24];
+    snprintf(pid, sizeof pid, "%lu", wait_pid);
+    const pid_t c = fork();
+    if (c < 0) return -1;
+    if (c == 0) {
+        setsid();
+        execl(exe, exe, "--after-update", pid, (char *)NULL);
+        _exit(127);
+    }
+    return 0;
+}
 
 static int xdg_config_home(char *out, size_t n)
 {

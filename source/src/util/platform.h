@@ -49,4 +49,13 @@ int vf_autostart_migrate(void);
 
 int vf_executable_path(char *out, size_t n);         /* UTF-8, 0 = ok */
 
+/* In-place update support. vf_swap_file puts `newf` in place of `target` - also when target is the running program
+ * (Windows: the old file is renamed to <target>.old, deleted by the next start; Linux: rename, mode 0755). 0 = ok.
+ * vf_spawn_after_update starts `exe --after-update <pid>`; that instance waits (vf_wait_pid, 0 = process gone) for
+ * `pid` to exit before it takes the single-instance lock. */
+int vf_swap_file(const char *newf, const char *target);
+unsigned long vf_current_pid(void);
+int vf_wait_pid(unsigned long pid, int timeout_ms);
+int vf_spawn_after_update(const char *exe, unsigned long wait_pid);
+
 #endif

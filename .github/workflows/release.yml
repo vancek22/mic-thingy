@@ -3,6 +3,8 @@ name: release
 # When a release is published (or by hand for an existing tag):
 #  1. builds the Windows and Linux programs from that tag,
 #  2. attaches them to the release under fixed names (the README buttons use releases/latest/download/<name>),
+#     plus the bare program + its .sha256 (mic-thingy.exe / mic-thingy-linux): the in-app "Update now" downloads
+#     only those, swaps the running program and restarts (src/app/update.c),
 #  3. commits the two programs to the repository root (mic-thingy.exe, mic-thingy-linux), so that
 #     "Code -> Download ZIP" contains README + both programs + the source/ folder.
 on:
@@ -56,6 +58,15 @@ jobs:
         run: |
           Compress-Archive -Path dist/mic-thingy -DestinationPath mic-thingy-windows-x64.zip -Force
           gh release upload "$env:TAG" mic-thingy-windows-x64.zip --clobber --repo "$env:GITHUB_REPOSITORY"
+      - name: Upload the program alone (for the in-app "Update now")
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # the running program downloads exactly these two files: releases/download/<tag>/mic-thingy.exe and .sha256
+          $h = (Get-FileHash build/mic-thingy.exe -Algorithm SHA256).Hash.ToLower()
+          [System.IO.File]::WriteAllText("$PWD/build/mic-thingy.exe.sha256", "$h  mic-thingy.exe`n")
+          gh release upload "$env:TAG" build/mic-thingy.exe build/mic-thingy.exe.sha256 --clobber --repo "$env:GITHUB_REPOSITORY"
       - uses: actions/upload-artifact@v4
         with:
           name: root-exe
@@ -92,6 +103,14 @@ jobs:
           cp ../README.md ../README.pl.md ../LICENSE THIRD_PARTY_NOTICES.md "$d/"
           tar -C dist -czf mic-thingy-linux-x86_64.tar.gz mic-thingy-linux-x86_64
           gh release upload "$TAG" mic-thingy-linux-x86_64.tar.gz --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Upload the program alone (for the in-app "Update now")
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # the running program downloads exactly these two files: releases/download/<tag>/mic-thingy-linux and .sha256
+          cp build/mic-thingy build/mic-thingy-linux
+          (cd build && sha256sum mic-thingy-linux > mic-thingy-linux.sha256)
+          gh release upload "$TAG" build/mic-thingy-linux build/mic-thingy-linux.sha256 --clobber --repo "$GITHUB_REPOSITORY"
       - uses: actions/upload-artifact@v4
         with:
           name: root-linux
