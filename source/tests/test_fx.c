@@ -388,6 +388,42 @@ static void test_aec(void)
     CHECK(memcmp(out + 4800, s + SR * 14 + 4800, 2400 * sizeof(float)) == 0, "silent reference altered the microphone");
     f2.destroy(&f2);
     fx.destroy(&fx);
+
+    /* Headset: the system plays music (reference) and NONE of it reaches the microphone. Voice for 4 s, then only key
+     * clicks and room noise. The canceller must leave the microphone alone - v1.1.0.2 added the music to it, 18 dB
+     * louder than the microphone itself right after the voice stopped ("oscillation / harmonising" in the pauses). */
+    enum { M = SR * 10 };
+    for (long i = 0; i < M; i++) {
+        const double t = (double)i / SR, env = 0.55 + 0.45 * sin(2.0 * PI * 2.0 * t);
+        x[i] = 0.3f * (float)(env * (sin(2.0 * PI * 220.0 * t) + 0.8 * sin(2.0 * PI * 277.2 * t) + 0.7 * sin(2.0 * PI * 329.6 * t)
+                                     + 0.4 * sin(2.0 * PI * 440.0 * t) + 0.3 * sin(2.0 * PI * 880.0 * t)) / 3.0) + 0.015f * noise();
+        double v = 0;
+        if (i < SR * 4) { for (int h = 1; h <= 12; h++) v += sin(2.0 * PI * 130.0 * h * t) / h; v *= 0.12 * (0.5 + 0.5 * sin(2.0 * PI * 3.0 * t)); }
+        const long ph = i % (SR / 6);
+        const float key = i >= SR * 4 && ph < 200 ? 0.05f * noise() * (float)exp(-(double)ph / 50.0) : 0.0f;
+        d[i] = (float)v + key + 0.002f * noise();
+    }
+    Fx f3; fx_aec_make(&f3); start(&f3);
+    fx_aec_attach(&f3, &ref);
+    vf_sink_flush(&ref);
+    vf_sink_write(&ref, zeros, 480);
+    for (long off = 0; off + VF_FRAME_SIZE <= M; off += VF_FRAME_SIZE) {
+        vf_sink_write(&ref, x + off, VF_FRAME_SIZE);
+        FxFrameCtx ctx = { 0 };
+        memcpy(out + off, d + off, VF_FRAME_SIZE * sizeof(float));
+        f3.process(&f3, out + off, VF_FRAME_SIZE, &ctx);
+    }
+    double pm[2] = { 0, 0 }, pa[2] = { 0, 0 };
+    for (long i = SR; i < M; i++) {
+        const int k = i >= SR * 4;
+        const double a = (double)out[i] - d[i];
+        pm[k] += (double)d[i] * d[i]; pa[k] += a * a;
+    }
+    const double add_voice = 10.0 * log10(pa[0] / pm[0] + 1e-20), add_keys = 10.0 * log10(pa[1] / pm[1] + 1e-20);
+    printf("  no echo path (headset), music playing: changes the microphone by %.1f dB while speaking, %.1f dB with keys only\n", add_voice, add_keys);
+    CHECK(add_keys < -20.0, "system sound leaks into the pauses: %.1f dB relative to the microphone", add_keys);
+    CHECK(add_voice < -6.0, "voice altered by %.1f dB without any echo", add_voice);
+    f3.destroy(&f3);
     vf_sink_free(&ref);
 }
 

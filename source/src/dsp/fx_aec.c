@@ -12,6 +12,7 @@ static const FxParamInfo k_params[] = {
 };
 
 #define MAX_DELAY  9600                 /* 200 ms */
+#define AEC_NEAR_K 30.0                /* weight of the unexplained (near-end) power in the step size */
 #define HIST       (AEC_TAPS + MAX_DELAY + VF_FRAME_SIZE)
 #define CAP        (HIST * 3)           /* linear history, compacted when full */
 
@@ -26,6 +27,8 @@ typedef struct {
     int hold;                           /* samples left with adaptation frozen (double talk) */
     int conv;                           /* latched after 1 s of clearly working cancellation */
     int good_run, frozen_run;           /* sample counters for latching / unlatching conv */
+    float sdy, syy;                     /* smoothed <mic, echo estimate> and <estimate, estimate> per frame */
+    float apply;                        /* share of the echo estimate that is subtracted, 0..1 (end of the last frame) */
 } AecState;
 
 static int aec_init(Fx *fx, int sr)
@@ -73,13 +76,18 @@ static void aec_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
     double en = 0.0;
     for (int k = 0; k < AEC_TAPS; k++) { const float v = x[-D - k]; en += (double)v * v; }
 
+    float ybuf[VF_FRAME_SIZE];
+    double fdy = 0.0, fyy = 0.0, fdd = 0.0;
     for (int i = 0; i < n; i++) {
         const float *xi = x + i - D;     /* newest reference sample of the filter window */
         const float *xs = xi - (AEC_TAPS - 1);   /* the weights are stored newest-last so both vectors run forwards */
         const float y = vf_dot(s->w, xs, AEC_TAPS);
         const float d = buf[i];
         const float e = d - y;
-        buf[i] = e;
+        ybuf[i] = y;
+        fdy += (double)d * y;
+        fyy += (double)y * y;
+        fdd += (double)d * d;
 
         /* double talk: (a) Geigel - the microphone is louder than an echo can be; (b) once converged,
          * the residual is as large as the echo estimate, so something else is in the signal */
@@ -98,7 +106,10 @@ static void aec_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
         s->frozen_run = s->hold > 0 ? s->frozen_run + 1 : 0;
         if (s->frozen_run > 10 * VF_SAMPLE_RATE) { s->conv = 0; s->good_run = 0; s->frozen_run = 0; }   /* the room changed: learn again */
         if (s->hold == 0 && en > 1e-4) {
-            const float g = s->mu * e / (float)(en + 1e-3);
+            /* The step shrinks with the power of what is NOT explained by the reference (AEC_TAPS x error power next to
+             * the reference energy): voice, keys or room noise that the double-talk detectors miss can then no longer
+             * drag the weights around. With a real echo the error is a fraction of the reference, so it costs little. */
+            const float g = s->mu * e / (float)(en + AEC_NEAR_K * (double)AEC_TAPS * s->pe + 1e-3);
             vf_axpy(s->w, xs, g, AEC_TAPS);
         }
         /* slide the energy window by one sample */
@@ -106,13 +117,36 @@ static void aec_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
         en += (double)newest * newest - (double)oldest * oldest;
         if (en < 0.0) en = 0.0;
     }
+
+    /* 3) subtract the estimate only as far as it is really in the microphone signal. A true echo estimate correlates
+     * with the microphone (projection <d,y>/<y,y> near 1); weights that learned something else produce an estimate
+     * that does not, and subtracting it would ADD the system sound to the microphone (headset: no echo at all, the
+     * music was audible in the pauses). The share follows the smoothed projection, clamped to 0..1, ramped over the
+     * frame; the output can therefore not get louder than the microphone on average. Useless weights fade out. */
+    s->sdy += 0.25f * ((float)fdy - s->sdy);
+    s->syy += 0.25f * ((float)fyy - s->syy);
+    float want = s->syy > 1e-9f ? vf_clampf(s->sdy / s->syy, 0.0f, 1.0f) : 0.0f;
+    /* ...and never when it would make this frame clearly louder than the microphone was (the voice just stopped and
+     * the smoothed share is still high): |d - a y|^2 - |d|^2 = a^2 <y,y> - 2 a <d,y>. "Clearly" = by more than a tenth
+     * of the frame's own energy, so a weak true echo under a loud voice (random sign of <d,y>) does not trip it. */
+    if ((double)want * want * fyy - 2.0 * want * fdy > 0.1 * fdd)
+        want = fyy > 1e-12 ? vf_clampf((float)(fdy / fyy), 0.0f, 1.0f) : 0.0f;
+    const float a0 = s->apply;
+    const int ramp = want < a0 ? 48 : n;                  /* down within 1 ms, up over the frame */
+    for (int i = 0; i < n; i++) {
+        const float a = i < ramp ? a0 + (want - a0) * (float)(i + 1) / (float)ramp : want;
+        buf[i] -= a * ybuf[i];
+    }
+    s->apply = want;
+    if (want < 0.3f && s->syy > 1e-9f)
+        for (int k = 0; k < AEC_TAPS; k++) s->w[k] *= 0.97f;
 }
 
 static void aec_set_param(Fx *fx, int id, float v)
 {
     AecState *s = (AecState *)fx->state;
     v = vf_clampf(v, k_params[id].min, k_params[id].max);
-    if (id == AEC_DELAY_MS) { const int d = (int)(v * 48.0f); if (d != s->delay) { s->delay = d; s->conv = 0; memset(s->w, 0, sizeof s->w); } }
+    if (id == AEC_DELAY_MS) { const int d = (int)(v * 48.0f); if (d != s->delay) { s->delay = d; s->conv = 0; memset(s->w, 0, sizeof s->w); s->sdy = s->syy = s->apply = 0.0f; } }
     else if (id == AEC_STRENGTH) s->mu = v;
 }
 

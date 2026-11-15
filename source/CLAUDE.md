@@ -462,3 +462,19 @@ this soak, but the old build also measured 113 MB in one CPU run, so that is not
 only when the cursor changes (`g_cursor_set`) - raylib creates a new GLFW cursor struct on every call, freed only by CloseWindow.
 How it was found: `GetGuiResources(GR_USEROBJECTS)` logged after each step of `window_open` / `window_close` (temporary), then the
 raylib-only loop with one flag at a time. Window classes and counts (EnumWindows) stayed the same every cycle, so it was never a window.
+
+**Echo canceller added the system sound in the pauses (fixed after v1.1.0.2):** user report - "oscillation / harmonising" when they
+stop talking and type or there is background sound (their settings: aec ON, delay 40, strength 0.4, nn erbdf, gate 0.79).
+Cause: on a headset there is NO echo path, but NLMS still adapted on voice / key clicks the double-talk detectors missed, the
+weights learned garbage and `e = d - y` subtracted a filtered copy of the system sound - in the pauses up to 18-27 dB LOUDER than
+the microphone itself (real recordings: Polish speech + keyboard as the mic, English babble as the reference). Fix in
+`fx_aec.c`: (1) step size `mu e / (en + AEC_NEAR_K * TAPS * pe)` - the power the reference does not explain slows adaptation
+(K = 30: 10 / 30 / 100 compared; 30 kept ERLE 66.6 dB and the best real-recording numbers); (2) the estimate is subtracted only
+by `apply` = smoothed projection <d,y>/<y,y> clamped 0..1 (true echo ~1, unrelated estimate ~0), ramped per frame, and cut to
+this frame's own projection when the smoothed share would make the frame louder than the mic by > 10 % of its energy; weights
+decay (x0.97 per frame) while the share stays < 0.3. Results, real recordings, ref at -32 / -21 / -12 dBFS: added in the pauses
+v1.1.0.2 +14.5 / +23.6 / +27.2 dB rel. mic (-52 / -43 / -39 dBFS) -> fixed -7.5 / -7.4 / -8.2 dB (-74 dBFS, mic -66); while
+speaking -5.9 / +7.3 / +10.5 -> -24.8 / -13.1 / -4.7 dB. Synthetic room echo test: ERLE 67.9 -> 66.6 dB, double-talk SDR 8.2 -> 7.9 dB.
+New `test_fx` case "no echo path (headset)": music reference, voice then keys, the canceller must change the mic by < -20 dB in
+the keys part (old: +12.2 dB, fails; new -26.3 dB). CPU: `+ aec` ~130-145 us per frame (noisy, unchanged order).
+Not done: real-room echo was never recorded here; the user still has to listen. With headphones the canceller is not needed at all.
