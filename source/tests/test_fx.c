@@ -500,6 +500,8 @@ static void test_chain_defaults(void)
 #include "dsp/fft960.h"
 #include "dsp/fx_nn.h"
 #include "nn_golden.h"
+#include "dsp/erbdf.h"
+#include "erbdf_golden.h"
 
 static float golden_x(long i)
 {
@@ -568,6 +570,56 @@ static void test_nn(void)
     fx.destroy(&fx);
 }
 
+static void test_erbdf(void)
+{
+    printf("erbdf denoiser (torch parity, model switch)\n");
+    static VfErbDf net;
+    CHECK(vf_erbdf_init(&net, &vf_erbdf_default) == 0, "erbdf weights fit the buffers");
+    const int V = vf_erbdf_default.V, NBINS = ERBDF_GOLDEN_BINS;
+    static float re[VF_ERB_MAXV], im[VF_ERB_MAXV], yr[VF_ERB_MAXV], yi[VF_ERB_MAXV];
+    double worst = 0, vworst = 0, hworst = 0;
+    for (int t = 0; t < ERBDF_GOLDEN_FRAMES; t++) {
+        const float *X = erbdf_golden_x + (long)t * NBINS * 2, *Y = erbdf_golden_y + (long)t * NBINS * 2;
+        for (int k = 0; k < V; k++) { re[k] = X[2 * k]; im[k] = X[2 * k + 1]; }
+        float hf;
+        const float v = vf_erbdf_step(&net, re, im, 0.0f, yr, yi, &hf);
+        double ymax = 1e-12;
+        for (int k = 0; k < NBINS; k++) ymax = fmax(ymax, fabs(Y[2 * k]) + fabs(Y[2 * k + 1]));
+        for (int k = 0; k < NBINS; k++) {
+            const float cr = k < V ? yr[k] : X[2 * k] * hf, ci = k < V ? yi[k] : X[2 * k + 1] * hf;
+            worst = fmax(worst, (fabs(cr - Y[2 * k]) + fabs(ci - Y[2 * k + 1])) / ymax);
+        }
+        vworst = fmax(vworst, fabs(v - erbdf_golden_vad[t]));
+        hworst = fmax(hworst, hf);
+    }
+    CHECK(worst < 2e-4, "erbdf output differs from torch by %.2g (relative to the frame peak)", worst);
+    CHECK(vworst < 1e-4, "erbdf voice probability differs from torch by %.2g", vworst);
+    CHECK(hworst > 0.0, "erbdf high-band gain is computed");
+    printf("  max diff vs torch: spectrum %.2g (relative), vad %.2g\n", worst, vworst);
+
+    /* the effect with model 1: finite, voice probability written, 480 samples delay; switching mid-stream is safe */
+    static Fx fx;
+    fx_nn_make(&fx);
+    CHECK(fx.init(&fx, SR) == 0, "nn init with both nets");
+    CHECK(fx.n_params == 3 && fx.params[NN_PARAM_MODEL].toggle == 1 && fx.params[NN_PARAM_MODEL].def == 0.0f,
+          "model is a toggle that defaults to nsnet");
+    static float buf[VF_FRAME_SIZE * 60];
+    for (int i = 0; i < VF_FRAME_SIZE * 60; i++) buf[i] = 0.3f * (float)sin(2 * PI * 300 * i / 48000.0) + noise() * 0.1f;
+    FxFrameCtx ctx = { 0 };
+    int finite = 1;
+    for (int b = 0; b < 60; b++) {
+        if (b == 10) fx.set_param(&fx, NN_PARAM_MODEL, 1.0f);
+        if (b == 30) fx.set_param(&fx, NN_PARAM_MODEL, 0.0f);
+        if (b == 45) fx.set_param(&fx, NN_PARAM_MODEL, 1.0f);
+        fx.process(&fx, buf + b * VF_FRAME_SIZE, VF_FRAME_SIZE, &ctx);
+        for (int i = 0; i < VF_FRAME_SIZE; i++) if (!isfinite(buf[b * VF_FRAME_SIZE + i]) || fabsf(buf[b * VF_FRAME_SIZE + i]) > 4.0f) finite = 0;
+    }
+    CHECK(finite, "output stays finite and bounded across model switches");
+    CHECK(ctx.vad_valid == 1 && ctx.vad_prob >= 0.0f && ctx.vad_prob <= 1.0f, "erbdf writes the voice probability");
+    CHECK(atomic_load(&fx.latency) == NN_DELAY_SAMPLES, "latency is the same for both models");
+    fx.destroy(&fx);
+}
+
 int main(void)
 {
     test_chain_defaults();
@@ -582,6 +634,7 @@ int main(void)
     test_dereverb();
     test_voice();
     test_nn();
+    test_erbdf();
     printf(g_fail ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

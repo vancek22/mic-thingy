@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "dsp/dsp_util.h"
+#include "dsp/erbdf.h"
 #include "dsp/fft960.h"
 
 #define FN   (2 * VF_FRAME_SIZE)     /* 960 */
@@ -12,6 +13,7 @@
 static const FxParamInfo k_params[] = {
     { "wet",   "",   0.0f,   1.0f,  1.0f,   0 },
     { "floor", "dB", -60.0f, 0.0f,  -40.0f, 0 },
+    { "model", "",   0.0f,  1.0f,  0.0f,   1 },        /* 0 = nsnet, 1 = erbdf (ERB bands + deep filtering) */
 };
 
 typedef struct {
@@ -23,6 +25,9 @@ typedef struct {
     float re[FN], im[FN];
     float feat[VF_NN_NB], gains[VF_NN_NB];
     float wet, floor_lin;
+    int model;                       /* 0 = nsnet (nn), 1 = erbdf; the other net is idle and keeps no stale state */
+    VfErbDf erb;
+    float yr[VF_ERB_MAXV], yi[VF_ERB_MAXV];
 } NnState;
 
 static int nn_init(Fx *fx, int sr)
@@ -31,7 +36,7 @@ static int nn_init(Fx *fx, int sr)
     NnState *s = (NnState *)calloc(1, sizeof *s);
     if (!s) return -1;
     const VfNnWeights *w = fx->state ? (const VfNnWeights *)fx->state : &vf_nn_default;
-    if (vf_nn_init(&s->nn, w) != 0) { free(s); return -1; }
+    if (vf_nn_init(&s->nn, w) != 0 || vf_erbdf_init(&s->erb, &vf_erbdf_default) != 0) { free(s); return -1; }
     vf_fft_init(&s->fft);
     for (int i = 0; i < FN; i++) {
         const double a = sin(3.14159265358979323846 * (i + 0.5) / FN);
@@ -53,23 +58,37 @@ static void nn_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
     }
     memset(s->im, 0, sizeof s->im);
     vf_fft(&s->fft, s->re, s->im, 0);
-    const VfNnWeights *wt = s->nn.w;
-    const int nb = wt->nb;
-    for (int k = 0; k < nb; k++)
-        s->feat[k] = log10f((s->re[k] * s->re[k] + s->im[k] * s->im[k]) / (float)VF_FRAME_SIZE + 1e-10f);
-    const float vad = vf_nn_step(&s->nn, s->feat, s->gains);
-    ctx->vad_prob = vad;
-    ctx->vad_valid = 1;
-
-    float hf = 0.0f;                             /* above the net's band: mean gain of hf_lo..hf_hi-1 */
-    for (int k = wt->hf_lo; k < wt->hf_hi; k++) hf += s->gains[k];
-    hf /= (float)(wt->hf_hi - wt->hf_lo);
     const float fl = s->floor_lin;
-    for (int k = 0; k < NBIN; k++) {
-        float g = k < nb ? s->gains[k] : hf;
-        if (g < fl) g = fl;
-        s->re[k] *= g; s->im[k] *= g;
-        if (k > 0 && k < FN / 2) { s->re[FN - k] *= g; s->im[FN - k] *= g; }
+    if (s->model == 0) {
+        const VfNnWeights *wt = s->nn.w;
+        const int nb = wt->nb;
+        for (int k = 0; k < nb; k++)
+            s->feat[k] = log10f((s->re[k] * s->re[k] + s->im[k] * s->im[k]) / (float)VF_FRAME_SIZE + 1e-10f);
+        const float vad = vf_nn_step(&s->nn, s->feat, s->gains);
+        ctx->vad_prob = vad;
+        ctx->vad_valid = 1;
+
+        float hf = 0.0f;                             /* above the net's band: mean gain of hf_lo..hf_hi-1 */
+        for (int k = wt->hf_lo; k < wt->hf_hi; k++) hf += s->gains[k];
+        hf /= (float)(wt->hf_hi - wt->hf_lo);
+        for (int k = 0; k < NBIN; k++) {
+            float g = k < nb ? s->gains[k] : hf;
+            if (g < fl) g = fl;
+            s->re[k] *= g; s->im[k] *= g;
+            if (k > 0 && k < FN / 2) { s->re[FN - k] *= g; s->im[FN - k] *= g; }
+        }
+    } else {
+        /* erbdf: complex output (deep filtering) for the bins the net sees, the mean stage-1 gain above them */
+        float hf;
+        const int V = s->erb.w->V;
+        ctx->vad_prob = vf_erbdf_step(&s->erb, s->re, s->im, fl, s->yr, s->yi, &hf);
+        ctx->vad_valid = 1;
+        if (hf < fl) hf = fl;
+        for (int k = 0; k < NBIN; k++) {
+            if (k < V) { s->re[k] = s->yr[k]; s->im[k] = s->yi[k]; }
+            else { s->re[k] *= hf; s->im[k] *= hf; }
+            if (k > 0 && k < FN / 2) { s->re[FN - k] = s->re[k]; s->im[FN - k] = -s->im[k]; }   /* conjugate half */
+        }
     }
     vf_fft(&s->fft, s->re, s->im, 1);
 
@@ -88,6 +107,13 @@ static void nn_set_param(Fx *fx, int id, float v)
     NnState *s = (NnState *)fx->state;
     if (id == NN_PARAM_WET) s->wet = vf_clampf(v, 0.0f, 1.0f);
     if (id == NN_PARAM_FLOOR) s->floor_lin = vf_db_to_lin(vf_clampf(v, -60.0f, 0.0f));
+    if (id == NN_PARAM_MODEL) {
+        const int m = v >= 0.5f;
+        if (m != s->model) {                        /* start the newly chosen net from silence, not from old states */
+            if (m) vf_erbdf_reset(&s->erb); else vf_nn_reset(&s->nn);
+            s->model = m;
+        }
+    }
 }
 
 static void nn_destroy(Fx *fx)

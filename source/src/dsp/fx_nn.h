@@ -10,6 +10,7 @@
 enum {
     NN_PARAM_WET = 0,      /* 0..1 dry/wet */
     NN_PARAM_FLOOR,        /* dB, lowest gain applied to any bin */
+    NN_PARAM_MODEL,        /* 0 = nsnet (gains only), 1 = erbdf (ERB-band gains + deep filtering, dsp/erbdf.h) */
 };
 
 #define NN_DELAY_SAMPLES VF_FRAME_SIZE

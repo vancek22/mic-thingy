@@ -338,3 +338,17 @@ effect run through `mic-thingy-file` alone (RNNoise bypassed) vs the previous we
 noisy input 2.729 / 3.175 / 0.928). The torch models on the same set: nsnet48k 17.13 dB SI-SDR, erbdf48k (10k steps) 17.00 dB,
 DNSMOS OVRL 3.025 / 3.040 - erbdf is not in the C code (a new conv + GRU + deep-filter engine would be needed for a
 0.015 DNSMOS gain). SI-SDR of externally processed files is not comparable (delay alignment, high-pass, gate).
+
+## nn effect: model choice nsnet / erbdf (2026-11-15)
+Param `nn model` (toggle, default 0 = nsnet; 1 = erbdf; GUI checkbox "erbdf model (off = nsnet)", console `set nn model 1`, stored
+in `[fx.nn]`). erbdf = `src/dsp/erbdf.[ch]` (C port of `ml/se/models/erbdf.py`: ERB-band conv + GRU gains, then a second GRU +
+conv encoder/decoder predict 5 complex taps per bin that filter the stage-1 output over the last frames on bins 0-4.8 kHz;
+bins above the net's band take the mean stage-1 gain) + generated `src/dsp/erbdf_weights.c` (`python ml/export_erbdf_c.py
+ml/runs/erbdf48k/best.pt`, 10 000 training steps, val SI-SDR gain +8.06 dB) + `tests/erbdf_golden.h`. Both nets live in the
+effect's state; `set_param` only flips the model and zeroes the newly chosen net's state. Delay 480 samples for both.
+`test_fx` "erbdf denoiser": C vs torch streaming output on the golden signal differs by 1.7e-5 relative to the frame peak,
+voice probability by 1.3e-7; also a run with model switches mid-stream (finite, bounded). Held-out set, effect alone through
+`mic-thingy-file` (RNNoise bypassed): nsnet DNSMOS OVRL 3.042 / BAK 3.915 / STOI 0.947 / pause attenuation 42.8 dB, erbdf
+3.044 / 3.924 / 0.945 / 50.5 dB (torch erbdf 3.040 / 3.892 / 0.949 / 53.5). `vf-bench`: nsnet 100.7 us per 10 ms frame (1.0 % of
+a core), erbdf 151.7 us (1.5 %). erbdf got 10k steps vs nsnet's 40k - it is offered as a choice, nsnet stays the default.
+The Linux build of this code is only compiled by CI.

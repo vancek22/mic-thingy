@@ -64,6 +64,8 @@ add_library(vfcore STATIC
   src/dsp/fft960.c
   src/dsp/nn.c
   src/dsp/nn_weights.c
+  src/dsp/erbdf.c
+  src/dsp/erbdf_weights.c
   src/dsp/fx_nn.c
   src/dsp/fx_gate.c
   src/dsp/fx_compressor.c

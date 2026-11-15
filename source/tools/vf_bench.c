@@ -10,6 +10,7 @@
 
 #include "dsp/chain.h"
 #include "dsp/fx_aec.h"
+#include "dsp/fx_nn.h"
 #include "dsp/fx_rnnoise.h"
 #include "dsp/fx_limiter.h"
 #include "audio/sink.h"
@@ -100,6 +101,19 @@ int main(int argc, char **argv)
         if (cfg == -3) base = best;
         printf("%-34s %10.1f %9.2f%%%s\n", name, best, best / 100.0, cfg >= 0 ? "" : "");
         (void)base;
+    }
+    {   /* the AI denoiser alone, both models (it is off by default, so the loops above skip it) */
+        const int nn = pipeline_find_fx(&p, "nn");
+        for (int model = 0; nn >= 0 && model < 2; model++) {
+            for (int i = 0; i < n; i++) pipeline_set_bypass(&p, i, 1);
+            pipeline_set_bypass(&p, nn, 0);
+            pipeline_set_param(&p, nn, NN_PARAM_MODEL, (float)model);
+            for (int w = 0; w < 100; w++) { float b[VF_FRAME_SIZE]; memcpy(b, in, sizeof b); pipeline_process(&p, b); }
+            double best = 1e30;
+            for (int r = 0; r < repeat; r++) { const double us = run(&p, in, frames); if (us < best) best = us; }
+            printf("\n%-42s %10.1f %9.2f%%", model ? "only nn, model erbdf" : "only nn, model nsnet", best, best / 100.0);
+        }
+        printf("\n");
     }
     pipeline_stop(&p);
     vf_sink_free(&ref);

@@ -239,6 +239,7 @@ static const Pair k_params[] = {
     { "rnnoise.lowlat",    "Low latency (~0.5 ms, rougher)", "Niskie opóźnienie (~0,5 ms, mniej gładkie)" },
     { "nn.wet",            "Strength", "Siła" },
     { "nn.floor",          "Maximum reduction", "Maksymalne tłumienie" },
+    { "nn.model",          "erbdf model (off = nsnet)", "Model erbdf (wył. = nsnet)" },
     { "limiter.lookahead", "Look-ahead", "Wyprzedzenie" },
     { "aec.delay",         "Reference delay", "Opóźnienie referencji" },
     { "aec.strength",      "Adaptation", "Adaptacja" },
