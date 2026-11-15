@@ -368,3 +368,13 @@ UI scaling was left out on purpose (the layout is fixed pixels; a render-texture
 Checked: unit tests (clamps, hue invariants, hidden-panel list, text round trip, settings round trip, old and garbage files),
 screenshots in EN/PL with a custom look applied through settings.ini, and a posted-mouse-message click test (accent swatch,
 always-on-top box, hiding a panel -> settings.ini).
+
+## "Update now" verified end to end (2026-11-15)
+Installed release v1.0.3 (copied from the release asset into `%LOCALAPPDATA%\Programs\mic thingy`, sha256 matched) -> Settings -> Check
+for updates -> "Version v1.0.3.5 is available" -> Update now: `mic-thingy.exe.new` + `.new.sha256` appeared, within ~1.5 s the old exe
+became `mic-thingy.exe.old` and the new one took its place (sha256 = the v1.0.3.5 asset) -> "v1.0.3.5 installed - restart to use it" ->
+Restart now: a process `mic-thingy.exe --after-update <old pid>` started, the old process was gone within 0.5 s, the `.old` file was
+removed by the new instance, header "v1.0.3.5", settings untouched (clicks were posted mouse messages, window captured from the screen).
+Gotcha when testing: ANY `mic-thingy.exe` started later (also a dev build or `--screenshot` run) refreshes the Start-menu copy
+`%LOCALAPPDATA%\Programs\mic thingy\mic-thingy.exe` when its size or time differs - do not run dev builds while a release copy is
+installed for an update test. Versions can have a 4th number (revision): v1.0.3.5 > v1.0.3, compared numerically.
