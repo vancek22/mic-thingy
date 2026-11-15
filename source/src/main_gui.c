@@ -661,7 +661,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--demo")) demo = 1;
         else if (!strcmp(argv[i], "--tab") && i + 1 < argc) tab_arg = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--cal-demo") && i + 1 < argc) cal_demo = atoi(argv[++i]);   /* screenshots of the wizard */
-        else if (!strcmp(argv[i], "--scroll") && i + 1 < argc) U.scroll = (float)atof(argv[++i]);   /* screenshots of the lower rows */
+        else if (!strcmp(argv[i], "--scroll") && i + 1 < argc) U.scroll = (float)atof(argv[++i]);   /* screenshots of the panels further right */
         else if (!strcmp(argv[i], "--after-update") && i + 1 < argc) after_update = strtoul(argv[++i], NULL, 10);
     }
 
@@ -1145,12 +1145,13 @@ int main(int argc, char **argv)
         for (int oi = 0; oi < np; oi++)
             if (!vf_look_hidden(&st.look, pn_names[pn_ord[oi]])) pn_vis[nvis++] = pn_ord[oi];
         const float pw = 292, ph = 276;
-        const Rectangle view = { 282, TOP + 30, WIN_W - 282 - 10, WIN_H - 27 - (TOP + 30) - 2 };
-        const float content_h = (float)((nvis + 2) / 3) * (ph + 6) - 6;
-        const float max_scroll = content_h > view.height ? content_h - view.height : 0;
+        /* two rows, scrolled horizontally: panel i sits in column i / 2, row i % 2 */
+        const Rectangle view = { 282, TOP + 30, 3 * (pw + 6) - 6, 2 * (ph + 6) - 6 };
+        const float content_w = (float)((nvis + 1) / 2) * (pw + 6) - 6;
+        const float max_scroll = content_w > view.width ? content_w - view.width : 0;
         if (U.drag_fx >= 0) {                                   /* carrying a panel near an edge scrolls the view */
-            if (mouse.y < view.y + 30) U.scroll -= 14;
-            else if (mouse.y > view.y + view.height - 30) U.scroll += 14;
+            if (mouse.x < view.x + 30) U.scroll -= 14;
+            else if (mouse.x > view.x + view.width - 30) U.scroll += 14;
         }
         U.scroll = U.scroll < 0 ? 0 : U.scroll > max_scroll ? max_scroll : U.scroll;
         U.mouse_in_view = CheckCollisionPointRec(mouse, view);
@@ -1163,8 +1164,8 @@ int main(int argc, char **argv)
         }
         for (int vi = 0; vi < nvis && U.tab == 0; vi++) {
             const int id = pn_vis[vi];
-            Rectangle box = { 282 + (float)(vi % 3) * (pw + 6), view.y + (float)(vi / 3) * (ph + 6) - U.scroll, pw, ph };
-            if (box.y > view.y + view.height || box.y + ph < view.y) continue;   /* fully out of sight */
+            Rectangle box = { view.x + (float)(vi / 2) * (pw + 6) - U.scroll, view.y + (float)(vi % 2) * (ph + 6), pw, ph };
+            if (box.x > view.x + view.width || box.x + pw < view.x) continue;   /* fully out of sight */
             if (U.drag_fx < 0 && !GuiIsLocked() && U.mouse_in_view && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
                 CheckCollisionPointRec(mouse, (Rectangle){ box.x + 4, box.y + 4, box.width - 140, 24 })) {
                 U.drag_fx = id;                                 /* title strip left of ON/OFF and Reset */
@@ -1266,25 +1267,26 @@ int main(int argc, char **argv)
         if (U.tab == 0) {
             EndScissorMode();
             if (!grid_was_locked) GuiUnlock();
-            /* scrollbar on the right edge (drag the thumb or use the wheel anywhere but on a slider) */
+            /* horizontal scrollbar under the panels (drag the thumb or use the wheel anywhere but on a slider) */
             if (max_scroll > 0) {
-                const Rectangle track = { view.x + view.width + 3, view.y, 6, view.height };
-                const float th_h = fmaxf(30.0f, track.height * view.height / content_h);
-                const Rectangle thumb = { track.x, track.y + (track.height - th_h) * (U.scroll / max_scroll), track.width, th_h };
+                const Rectangle track = { view.x, view.y + view.height + 1, view.width, 4 };
+                const float th_w = fmaxf(40.0f, track.width * view.width / content_w);
+                const Rectangle thumb = { track.x + (track.width - th_w) * (U.scroll / max_scroll), track.y, th_w, track.height };
                 DrawRectangleRec(track, C_LCD_BG);
                 DrawRectangleRec(thumb, U.scroll_drag ? C_NEON : mixc(C_NEON, C_LCD_BG, 0.45f));
                 if (!GuiIsLocked() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
-                    CheckCollisionPointRec(mouse, (Rectangle){ track.x - 4, track.y, track.width + 8, track.height })) {
+                    CheckCollisionPointRec(mouse, (Rectangle){ track.x, track.y - 3, track.width, track.height + 6 })) {
                     U.scroll_drag = 1;
-                    U.scroll_grab = CheckCollisionPointRec(mouse, thumb) ? mouse.y - thumb.y : th_h / 2;
+                    U.scroll_grab = CheckCollisionPointRec(mouse, (Rectangle){ thumb.x, thumb.y - 3, thumb.width, thumb.height + 6 }) ? mouse.x - thumb.x : th_w / 2;
                 }
                 if (U.scroll_drag) {
                     if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) U.scroll_drag = 0;
-                    else U.scroll = (mouse.y - U.scroll_grab - track.y) / (track.height - th_h) * max_scroll;
+                    else U.scroll = (mouse.x - U.scroll_grab - track.x) / (track.width - th_w) * max_scroll;
                 }
-                const float wheel = GetMouseWheelMove();
+                const Vector2 wv = GetMouseWheelMoveV();         /* the vertical wheel (or a sideways one) moves the row */
+                const float wheel = wv.y != 0 ? wv.y : -wv.x;
                 if (wheel != 0 && U.mouse_in_view && !U.wheel_used && !GuiIsLocked()) {
-                    U.scroll -= wheel * 90.0f;
+                    U.scroll -= wheel * 100.0f;
                     U.scroll_latch = vf_now_s() + 0.4;          /* keep scrolling when a slider slides under the mouse */
                 }
                 U.scroll = U.scroll < 0 ? 0 : U.scroll > max_scroll ? max_scroll : U.scroll;

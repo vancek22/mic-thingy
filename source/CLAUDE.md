@@ -410,3 +410,7 @@ The view is clipped with `BeginScissorMode` and the GUI is locked while the mous
 take clicks; a lock that was already set, e.g. by an open dropdown, is kept). The spectrum ring runs while the spectrum panel is
 drawn (`U.spectrum_shown`). Checked with posted mouse messages on a renamed dev copy: an old layout + start tab are migrated
 and autosaved, 20 wheel steps (some over sliders) changed no [fx.*] value, a tool panel dragged at the end of the scroll range.
+**Horizontal scrolling (v1.0.4.1)**: the main view is two rows, scrolled sideways (panel i sits in column i/2, row i%2; 3 columns
+visible). The vertical wheel (or a sideways wheel) moves the row; the scrollbar is a thin strip under the panels (y 761, just
+above the status bar); a carried panel scrolls the view near the left / right edge; `--scroll PX` = pixels scrolled right.
+Same click test as above (wheel over sliders changed nothing, a tool dragged at the far right end, old layout migrated).

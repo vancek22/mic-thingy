@@ -291,7 +291,7 @@ static const char *panel_title(const char *id)
 }
 
 /* A panel carried by its title strip (main_gui.c starts the drag): drop it on another place of the grid. The view
- * scrolls when the panel is carried near its top or bottom edge. Only the drawing order changes, never the audio chain. */
+ * scrolls sideways when the panel is carried near its left or right edge. Only the drawing order changes, never the audio chain. */
 static void drag_panel(VfSettings *st, Vector2 mouse, Rectangle view, const char *const *names, const int *defp, int n,
                        const int *vis_all, int nvis_all)
 {
@@ -303,14 +303,14 @@ static void drag_panel(VfSettings *st, Vector2 mouse, Rectangle view, const char
         if (vis_all[k] != id) vis[nv++] = vis_all[k];
     int target = -1;
     if (CheckCollisionPointRec(mouse, view)) {
-        const int col = (int)((mouse.x - view.x) / (pw + 6)), row = (int)((mouse.y - view.y + U.scroll) / (ph + 6));
-        if (col >= 0 && col < 3 && row >= 0) target = row * 3 + col;
+        const int col = (int)((mouse.x - view.x + U.scroll) / (pw + 6)), row = (int)((mouse.y - view.y) / (ph + 6));
+        if (col >= 0 && row >= 0 && row < 2) target = col * 2 + row;          /* two rows, column by column */
         if (target > nv) target = nv;
     }
     if (U.drag_moved) {
         if (target >= 0) {
             BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
-            DrawRectangleLinesEx((Rectangle){ view.x + (float)(target % 3) * (pw + 6), view.y + (float)(target / 3) * (ph + 6) - U.scroll, pw, ph }, 3, C_NEON);
+            DrawRectangleLinesEx((Rectangle){ view.x + (float)(target / 2) * (pw + 6) - U.scroll, view.y + (float)(target % 2) * (ph + 6), pw, ph }, 3, C_NEON);
             EndScissorMode();
         }
         Rectangle g = { mouse.x - U.drag_dx, mouse.y - U.drag_dy, pw, 28 };    /* the carried title strip */
