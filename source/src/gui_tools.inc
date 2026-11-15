@@ -8,7 +8,8 @@
 #define HK_COUNT  (3 + VF_BOARD_SLOTS)      /* mute, ptt, bypass, board slots */
 
 typedef struct Ui {
-    int tab;                                /* 0..2 effect pages, 3 tools, 4 settings */
+    int tab;                                /* 0..2 effect pages, 3 tools, 4 settings, 5 look */
+    int look_sel;                           /* colour selected in the Look tab (TC_*) */
     int compact;
     VfUndo undo;
     VfSnap seen, cmp_snap;
@@ -113,7 +114,7 @@ static void apply_window_mode(int compact)
         SetWindowState(FLAG_WINDOW_TOPMOST);
         if (g_st->cwin_x != -32000 && window_pos_ok(g_st->cwin_x, g_st->cwin_y)) SetWindowPosition(g_st->cwin_x, g_st->cwin_y);
     } else {
-        ClearWindowState(FLAG_WINDOW_TOPMOST);
+        if (!g_st->look.topmost) ClearWindowState(FLAG_WINDOW_TOPMOST);
         SetWindowSize(WIN_W, WIN_H);
         if (g_st->win_x != -32000 && window_pos_ok(g_st->win_x, g_st->win_y)) SetWindowPosition(g_st->win_x, g_st->win_y);
     }
@@ -441,6 +442,8 @@ static void draw_tools(Rectangle area, VfSession *s, VfSettings *st, int sel_mod
 
 /* ---- settings tab ---- */
 
+#include "look_tab.inc"
+
 static const char *hk_row_label(int i)
 {
     return i == 0 ? tr(S_HK_MUTE) : i == 1 ? tr(S_HK_PTT) : tr(S_HK_BYPASS);
@@ -462,10 +465,10 @@ static void draw_settings(Rectangle area, VfSession *s, VfSettings *st, VfPreset
     float py = box.y + 36;
     text(F.ui, tr(S_THEME), box.x + 14, py, C_TEXT);
     py += 24;
-    int th = vf_theme_find(st->theme);
+    int th = theme_index(st);
     const int th0 = th;
-    GuiToggleGroup((Rectangle){ box.x + 14, py, 84, 26 }, tr(S_THEMES), &th);
-    if (th != th0) { snprintf(st->theme, sizeof st->theme, "%s", vf_theme_get(th)->id); retheme(th); }
+    GuiToggleGroup((Rectangle){ box.x + 14, py, 64, 26 }, tr(S_THEMES), &th);
+    if (th != th0) theme_select(st, th);
     py += 40;
     int cmp = U.compact;
     if (check_row(box, &py, tr(S_COMPACT_MODE), &cmp, 1)) apply_window_mode(cmp);

@@ -98,6 +98,7 @@ add_library(vfcore STATIC
   src/app/calibrate.c
   src/app/undo.c
   src/app/theme.c
+  src/app/look.c
   src/app/automute.c
   src/app/appwatch.c
   src/app/howl.c

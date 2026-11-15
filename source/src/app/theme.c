@@ -41,3 +41,11 @@ int vf_theme_find(const char *id)
         if (id && !strcmp(id, k_themes[i].id)) return i;
     return 0;
 }
+
+const char *vf_theme_color_name(int tc)
+{
+    static const char *const k_names[TC_COUNT] = {
+        "bg_top", "bg_bottom", "panel", "bevel_hi", "bevel_lo", "edge", "slate_a", "slate_b", "accent", "on_btn",
+        "off", "off_hi", "off_text", "text", "text_dim", "title", "lcd_bg", "seg_off", "warn", "error" };
+    return tc >= 0 && tc < TC_COUNT ? k_names[tc] : "";
+}

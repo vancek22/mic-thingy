@@ -26,5 +26,6 @@ typedef struct VfTheme {
 int            vf_theme_count(void);
 const VfTheme *vf_theme_get(int index);
 int            vf_theme_find(const char *id);      /* index, 0 (default) if unknown */
+const char    *vf_theme_color_name(int tc);        /* "bg_top", "accent" ... (keys in settings.ini and the look text) */
 
 #endif

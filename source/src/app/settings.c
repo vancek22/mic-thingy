@@ -83,6 +83,7 @@ void vf_settings_defaults(VfSettings *s)
     s->monitor_gain_db = -6.0f;
     s->monitor_raw = 0;
     snprintf(s->theme, sizeof s->theme, "graphite");
+    vf_look_defaults(&s->look);
     s->overlay_corner = 1;
     s->howl_guard = 1;
     s->hk_grab = 1;
@@ -189,6 +190,7 @@ int vf_settings_load(VfSettings *s, Pipeline *p, const char *path)
     s->monitor_raw = vf_ini_get_int(&ini, "audio_extra", "monitor_raw", s->monitor_raw) != 0;
     copy(s->theme, sizeof s->theme, vf_ini_get(&ini, "app", "theme"));
     if (!s->theme[0]) snprintf(s->theme, sizeof s->theme, "graphite");
+    vf_look_load(&s->look, &ini);
     s->compact = vf_ini_get_int(&ini, "app", "compact", s->compact) != 0;
     s->overlay = vf_ini_get_int(&ini, "app", "overlay", s->overlay) != 0;
     s->overlay_corner = vf_ini_get_int(&ini, "app", "overlay_corner", s->overlay_corner) & 3;
@@ -255,6 +257,7 @@ int vf_settings_save(const VfSettings *s_in, const Pipeline *p, const char *path
     const VfSettings *s = &clean;
     oneline(clean.input); oneline(clean.output); oneline(clean.monitor); oneline(clean.sys_device);
     oneline(clean.preset); oneline(clean.language); oneline(clean.theme);
+    oneline(clean.look.font_ui); oneline(clean.look.font_lcd); oneline(clean.look.hidden);
     for (int i = 0; i < 8; i++) { oneline(clean.board_path[i]); oneline(clean.hk_board[i]); }
     oneline(clean.hk_mute); oneline(clean.hk_ptt); oneline(clean.hk_bypass);
     for (int i = 0; i < clean.n_apps; i++) { oneline(clean.apps[i].exe); oneline(clean.apps[i].preset); }
@@ -271,6 +274,7 @@ int vf_settings_save(const VfSettings *s_in, const Pipeline *p, const char *path
             s->theme, s->compact, s->overlay, s->overlay_corner, s->per_mic, s->auto_mute_lock, s->auto_mute_idle_min, s->howl_guard, s->start_menu);
     fprintf(f, "\n[audio_extra]\nmonitor_gain_db = %.1f\nmonitor_raw = %d\n", (double)s->monitor_gain_db, s->monitor_raw);
     fprintf(f, "\n[window]\nx = %d\ny = %d\ncompact_x = %d\ncompact_y = %d\n", s->win_x, s->win_y, s->cwin_x, s->cwin_y);
+    vf_look_write(f, &s->look);
     fprintf(f, "\n[mix]\nboard_gain_db = %.1f\nsys_gain_db = %.1f\nsys_duck_db = %.1f\nsys_enabled = %d\nsys_device = %s\n",
             (double)s->board_gain_db, (double)s->sys_gain_db, (double)s->sys_duck_db, s->sys_enabled, s->sys_device);
     fprintf(f, "\n[board]\n");

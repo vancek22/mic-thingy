@@ -19,6 +19,7 @@
 #include "app/soundboard.h"
 #include "app/session.h"
 #include "app/stats.h"
+#include "app/look.h"
 #include "app/theme.h"
 #include "app/undo.h"
 #include "util/console.h"
@@ -621,6 +622,136 @@ static void test_themes(void)
     }
 }
 
+static void test_look(void)
+{
+    printf("look (GUI customisation)\n");
+    int ok;
+    CHECK(vf_rgb_parse("#1e222b", &ok) == 0x1e222bu && ok, "hex parse");
+    CHECK(vf_rgb_parse("FF00aa", &ok) == 0xff00aau && ok, "hex without #, upper case");
+    vf_rgb_parse("12345", &ok);
+    CHECK(!ok, "short hex rejected");
+    vf_rgb_parse("12345g", &ok);
+    CHECK(!ok, "non-hex rejected");
+    vf_rgb_parse("1234567", &ok);
+    CHECK(!ok, "too long hex rejected");
+    char hex[8];
+    vf_rgb_format(0x0a0b0c, hex);
+    CHECK(!strcmp(hex, "#0a0b0c"), "hex format %s", hex);
+
+    VfLook l;
+    vf_look_defaults(&l);
+    VfRgba gr[TC_COUNT], cu[TC_COUNT];
+    vf_look_colors(&l, "graphite", gr, 1);
+    vf_look_colors(&l, "custom", cu, 1);
+    int same = 1;
+    for (int i = 0; i < TC_COUNT; i++) same &= gr[i].r == cu[i].r && gr[i].g == cu[i].g && gr[i].b == cu[i].b;
+    CHECK(same, "the custom theme starts as a copy of graphite");
+    CHECK(l.opacity == 100 && l.grid && l.scanlines && l.glow && !l.topmost && l.meter_warn_db == -18.0f && l.meter_clip_db == -6.0f &&
+          l.meter_hold_s == 1.5f && l.meter_fall == 30.0f && l.start_tab == 0 && !l.hidden[0], "defaults match the old fixed look");
+
+    /* values are clamped / validated */
+    vf_look_apply(&l, "hue", "999"); vf_look_apply(&l, "opacity", "5"); vf_look_apply(&l, "start_tab", "99");
+    vf_look_apply(&l, "meter_warn", "-99"); vf_look_apply(&l, "meter_clip", "50"); vf_look_apply(&l, "meter_hold", "-1"); vf_look_apply(&l, "meter_fall", "9999");
+    CHECK(l.hue == 180 && l.opacity == 40 && l.start_tab == VF_LOOK_TABS - 1 && l.meter_warn_db == -40.0f && l.meter_clip_db == 0.0f &&
+          l.meter_hold_s == 0.0f && l.meter_fall == 120.0f, "out-of-range values are clamped");
+    CHECK(!vf_look_apply(&l, "font_ui", "../../evil") && l.font_ui[0] == '\0', "unsafe font id rejected");
+    CHECK(vf_look_apply(&l, "font_ui", "segoeui") && !strcmp(l.font_ui, "segoeui"), "font id accepted");
+    CHECK(!vf_look_apply(&l, "custom_accent", "nothex") && !vf_look_apply(&l, "unknown_key", "1") && !vf_look_apply(&l, "custom_nope", "#ffffff"), "bad keys / values ignored");
+    CHECK(vf_look_apply(&l, "custom_accent", "#00e5ff") && l.custom[TC_ACCENT] == 0x00e5ffu, "custom colour set");
+
+    /* hue shift moves the chassis but never the state colours */
+    for (int ti = 0; ti < vf_theme_count(); ti++) {
+        const VfTheme *t = vf_theme_get(ti);
+        for (int hue = -180; hue <= 180; hue += 45) {
+            VfLook h;
+            vf_look_defaults(&h);
+            h.hue = hue;
+            VfRgba out[TC_COUNT];
+            vf_look_colors(&h, t->id, out, 1);
+            int state_same = 1;
+            const int st_idx[] = { TC_ACCENT, TC_ON_BTN, TC_OFF, TC_OFF_HI, TC_OFF_TEXT, TC_WARN, TC_ERROR };
+            for (int k = 0; k < 7; k++)
+                state_same &= out[st_idx[k]].r == t->c[st_idx[k]].r && out[st_idx[k]].g == t->c[st_idx[k]].g && out[st_idx[k]].b == t->c[st_idx[k]].b;
+            CHECK(state_same, "%s hue %d: state colours changed", t->id, hue);
+            CHECK(rgb_dist(out[TC_ACCENT], out[TC_OFF]) > 90 && rgb_dist(out[TC_OFF], out[TC_WARN]) > 90, "%s hue %d: ON / OFF / warning still distinct", t->id, hue);
+            CHECK(abs(luma(out[TC_TEXT]) - luma(out[TC_PANEL])) > 90, "%s hue %d: text still readable (%d)", t->id, hue, abs(luma(out[TC_TEXT]) - luma(out[TC_PANEL])));
+        }
+    }
+    VfLook h;
+    vf_look_defaults(&h);
+    h.hue = -120;
+    VfRgba shifted[TC_COUNT], plain[TC_COUNT];
+    vf_look_colors(&h, "graphite", shifted, 1);
+    vf_look_colors(&h, "graphite", plain, 0);
+    CHECK(shifted[TC_BG_TOP].g > shifted[TC_BG_TOP].b && plain[TC_BG_TOP].b > plain[TC_BG_TOP].g, "hue -120 turns the bluish chassis greenish");
+    vf_look_make_custom(&h, "amber");
+    CHECK(h.custom[TC_ACCENT] == 0xffb000u, "make_custom copies the current theme without the hue (0x%06x)", h.custom[TC_ACCENT]);
+
+    /* hidden panels */
+    VfLook hp;
+    vf_look_defaults(&hp);
+    vf_look_set_hidden(&hp, "voice", 1); vf_look_set_hidden(&hp, "warmth", 1); vf_look_set_hidden(&hp, "voice", 1);
+    CHECK(vf_look_hidden(&hp, "voice") && vf_look_hidden(&hp, "warmth") && !vf_look_hidden(&hp, "comp") && !strcmp(hp.hidden, "voice,warmth"), "hide two panels (%s)", hp.hidden);
+    CHECK(!vf_look_hidden(&hp, "voic") && !vf_look_hidden(&hp, "warm"), "names match whole words only");
+    vf_look_set_hidden(&hp, "voice", 0);
+    CHECK(!strcmp(hp.hidden, "warmth"), "show again, first (%s)", hp.hidden);
+    vf_look_set_hidden(&hp, "voice", 1); vf_look_set_hidden(&hp, "warmth", 0);
+    CHECK(!strcmp(hp.hidden, "voice"), "show again, last (%s)", hp.hidden);
+    vf_look_set_hidden(&hp, "voice", 0);
+    CHECK(!hp.hidden[0], "show again, only one");
+
+    /* clipboard text round trip, including a theme id and a garbage paste */
+    VfLook a, b;
+    vf_look_defaults(&a);
+    a.hue = -70; a.opacity = 85; a.topmost = 1; a.grid = 0; a.glow = 0; a.start_tab = 5; a.meter_warn_db = -24; a.meter_clip_db = -9;
+    a.meter_hold_s = 3.0f; a.meter_fall = 55.0f;
+    snprintf(a.font_ui, sizeof a.font_ui, "verdana"); snprintf(a.font_lcd, sizeof a.font_lcd, "consola");
+    a.custom[TC_ACCENT] = 0xff40c8; a.custom[TC_BG_TOP] = 0x101820;
+    vf_look_set_hidden(&a, "voice", 1);
+    char text[2048], theme[16] = "graphite";
+    const int n = vf_look_to_text(&a, "custom", text, sizeof text);
+    CHECK(n > 200 && n < 1500 && strstr(text, "theme = custom") && strstr(text, "custom_accent = #ff40c8"), "look text (%d bytes)", n);
+    vf_look_defaults(&b);
+    const int got = vf_look_from_text(&b, theme, sizeof theme, text);
+    CHECK(got >= 30 && !strcmp(theme, "custom"), "paste recognises %d lines, theme %s", got, theme);
+    CHECK(b.hue == -70 && b.opacity == 85 && b.topmost == 1 && b.grid == 0 && b.glow == 0 && b.scanlines == 1 && b.start_tab == 5 &&
+          b.meter_warn_db == -24.0f && b.meter_clip_db == -9.0f && b.meter_hold_s == 3.0f && b.meter_fall == 55.0f &&
+          !strcmp(b.font_ui, "verdana") && !strcmp(b.font_lcd, "consola") && b.custom[TC_ACCENT] == 0xff40c8u && b.custom[TC_BG_TOP] == 0x101820u &&
+          vf_look_hidden(&b, "voice"), "every value survives the text round trip");
+    CHECK(vf_look_to_text(&a, "custom", text, 100) == 0, "too small buffer reported");
+    VfLook c = b;
+    strcpy(theme, "amber");
+    CHECK(vf_look_from_text(&c, theme, sizeof theme, "hello world\nnothing = here\n") == 0 && !strcmp(theme, "amber") && c.hue == -70, "a garbage paste changes nothing");
+    CHECK(vf_look_from_text(&c, theme, sizeof theme, "theme = nonexistent\nhue = 5\n") == 1 && !strcmp(theme, "amber") && c.hue == 5, "unknown theme id is ignored");
+    VfLook m;
+    vf_look_defaults(&m);
+    vf_look_from_text(&m, theme, sizeof theme, "meter_warn = -10\nmeter_clip = -20\n");
+    CHECK(m.meter_clip_db > m.meter_warn_db, "red always starts above amber (%.0f / %.0f)", (double)m.meter_warn_db, (double)m.meter_clip_db);
+
+    /* settings.ini: save, load, and an old file without [look] */
+    VfSettings s, r;
+    vf_settings_defaults(&s);
+    s.look = a;
+    snprintf(s.theme, sizeof s.theme, "custom");
+    pipe_setup();
+    pipeline_start(&g_pipe, SR);
+    char path[VF_PATH_MAX];
+    CHECK(vf_settings_path(path, sizeof path) == 0 && vf_settings_save(&s, &g_pipe, path) == 0, "save settings with a look");
+    vf_settings_defaults(&r);
+    CHECK(vf_settings_load(&r, &g_pipe, path) == 0 && !strcmp(r.theme, "custom") && r.look.hue == -70 && r.look.opacity == 85 && r.look.custom[TC_ACCENT] == 0xff40c8u &&
+          !strcmp(r.look.font_ui, "verdana") && vf_look_hidden(&r.look, "voice") && r.look.meter_hold_s == 3.0f, "settings.ini round trip");
+    FILE *f = vf_fopen(path, "wb");
+    if (f) { fputs("[app]\nlanguage = pl\ntheme = amber\n", f); fclose(f); }
+    vf_settings_defaults(&r);
+    CHECK(vf_settings_load(&r, &g_pipe, path) == 0 && r.look.opacity == 100 && r.look.grid == 1 && r.look.meter_warn_db == -18.0f && !r.look.hidden[0],
+          "an old settings.ini keeps the default look");
+    f = vf_fopen(path, "wb");
+    if (f) { fputs("[look]\nhue = abc\nopacity = 1000\ngrid = 0\nfont_ui = ../x\nhidden = Voice;DROP,comp\n", f); fclose(f); }
+    vf_settings_defaults(&r);
+    vf_settings_load(&r, &g_pipe, path);
+    CHECK(r.look.opacity == 100 && r.look.grid == 0 && r.look.font_ui[0] == '\0' && !strcmp(r.look.hidden, "oice,comp"), "garbage in [look] is sanitised (%s)", r.look.hidden);
+}
+
 static void test_settings_ext(void)
 {
     printf("settings: new fields, profiles, export/import\n");
@@ -956,6 +1087,8 @@ static void test_update(void)
     printf("update check helpers\n");
     CHECK(vf_version_cmp("v1.0.1", "1.0.0") == 1, "1.0.1 > 1.0.0");
     CHECK(vf_version_cmp("1.0.0", "v1.0.0") == 0, "equal");
+    CHECK(vf_version_cmp("v1.0.3.5", "1.0.3") == 1 && vf_version_cmp("1.0.3", "v1.0.3.5") == -1 && vf_version_cmp("1.0.3.5", "1.0.3.5") == 0, "a fourth number (revision) counts: 1.0.3.5 > 1.0.3");
+    CHECK(vf_version_cmp("v1.0.4", "1.0.3.9") == 1, "1.0.4 > 1.0.3.9");
     CHECK(vf_version_cmp("v1.9", "v1.10") == -1, "numeric, not text: 1.9 < 1.10");
     CHECK(vf_version_cmp("2.0.0-beta", "1.9.9") == 1, "suffix ignored");
     CHECK(vf_version_cmp("nightly", "1.0.0") == -2, "no digits");
@@ -1094,6 +1227,7 @@ int main(void)
     test_automute();
     test_appwatch();
     test_themes();
+    test_look();
     test_settings_ext();
     test_recorder();
     test_spectrum_and_scope();

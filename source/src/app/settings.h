@@ -11,6 +11,7 @@
 
 #include <stdio.h>
 #include "app/appwatch.h"
+#include "app/look.h"
 #include "dsp/pipeline.h"
 #include "util/ini.h"
 #include "util/platform.h"
@@ -28,7 +29,8 @@ typedef struct VfSettings {
     float monitor_gain_db;
     int   monitor_raw;
     /* look and window */
-    char  theme[16];           /* theme id, see app/theme.h */
+    char  theme[16];           /* theme id ("graphite", "amber", "classic", "custom"), see app/theme.h, app/look.h */
+    VfLook look;               /* GUI customisation ([look] section) */
     int   compact;             /* small always-on-top meter window */
     int   overlay;             /* in-game microphone indicator (Windows) */
     int   overlay_corner;      /* 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right */

@@ -250,7 +250,7 @@ spectrum analyser (UI sets/clears it). Engine hooks: `pre_tap` (raw input), `cap
 also with no window (hotkeys, mute, overlay, stats, per-program presets, per-mic profiles). Colours: `g_c[]` filled by
 `apply_theme()`; use the `C_*` macros and `mixc()`; text on dark strips goes through `on_dark()`. Compact window is its
 own drawing path (`draw_compact`). Switching theme at runtime: `retheme()` (must reset the raygui font first).
-Screenshot flags: `--tab N` (0..4), settings.ini `theme = amber|classic`, `compact = 1`.
+Screenshot flags: `--tab N` (0..5), settings.ini `theme = amber|classic`, `compact = 1`.
 settings.ini gained [window] [mix] [board] [hotkeys] [apps] and app keys (theme, compact, overlay, per_mic_profiles,
 auto_mute_*), monitor keys live in [audio_extra]. Old files still load (defaults for new keys).
 
@@ -352,3 +352,19 @@ voice probability by 1.3e-7; also a run with model switches mid-stream (finite, 
 3.044 / 3.924 / 0.945 / 50.5 dB (torch erbdf 3.040 / 3.892 / 0.949 / 53.5). `vf-bench`: nsnet 100.7 us per 10 ms frame (1.0 % of
 a core), erbdf 151.7 us (1.5 %). erbdf got 10k steps vs nsnet's 40k - it is offered as a choice, nsnet stays the default.
 The Linux build of this code is only compiled by CI.
+
+## GUI customisation: the Look tab (2026-11-15)
+Tab 5 "Look" (6 panels, `src/look_tab.inc`, included by gui_tools.inc) over the pure-logic module `app/look.[ch]` (tested in
+`test_app` "look"): **colours** (the 20 theme colours; the 4th theme "custom" = user colours, editing a colour starts from the
+theme on screen; swatch grid + R/G/B sliders), **accent** (8 presets, set accent + ON button colour), **chassis hue** shift
+(-180..180, never moves ON/OFF/warning/error colours - tested at every 45 degrees for all themes: they stay distinct and the text
+readable), **window** (opacity 40-100 %, always on top, tab at start), **level meters** (amber / red thresholds, peak hold time,
+fall speed, live preview), **fonts** (UI + display font from the installed ones, live reload via `reload_fonts()`) and
+**decoration** (background grid, display scanlines, glow), **panels shown** (hide effect panels; they only stop being drawn, the
+effect keeps running), copy / paste the whole look as text through the clipboard (same `key = value` lines as `[look]`), and one
+"Reset look". Stored in settings.ini `[look]` + `[app] theme` (app level: not part of presets or per-mic profiles); the new
+keys are in `settings_hash()` (autosave detector - a field missing there would never be saved) and old files load with defaults.
+UI scaling was left out on purpose (the layout is fixed pixels; a render-texture upscale would blur all text).
+Checked: unit tests (clamps, hue invariants, hidden-panel list, text round trip, settings round trip, old and garbage files),
+screenshots in EN/PL with a custom look applied through settings.ini, and a posted-mouse-message click test (accent swatch,
+always-on-top box, hiding a panel -> settings.ini).

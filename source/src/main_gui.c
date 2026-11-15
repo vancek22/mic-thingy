@@ -58,6 +58,8 @@
  * Split-complementary idea of the default theme: cool neutrals, ONE accent (ON), burgundy (OFF),
  * amber only as the meter warning. Derived shades are computed with mixc() so every theme works. */
 static Color g_c[TC_COUNT];
+static VfSettings *g_st;                       /* settings, shared with gui_tools.inc */
+#define LK (g_st->look)                        /* GUI customisation (app/look.h) */
 #define C_BG_TOP     g_c[TC_BG_TOP]
 #define C_BG_BOTTOM  g_c[TC_BG_BOTTOM]
 #define C_PANEL      g_c[TC_PANEL]
@@ -106,6 +108,49 @@ static Font load_font(const char *const *paths, int npaths, int size)
     return GetFontDefault();
 }
 
+/* Font families the user can pick on the Look tab (only those whose file exists are offered; "" = the built-in
+ * choice below). Every family needs Latin Extended-A for Polish - all of these have it. */
+typedef struct { const char *id, *name, *reg, *bold; } FontFam;
+static const FontFam k_fonts_ui[] = {
+    { "tahoma", "Tahoma", "C:/Windows/Fonts/tahoma.ttf", "C:/Windows/Fonts/tahomabd.ttf" },
+    { "verdana", "Verdana", "C:/Windows/Fonts/verdana.ttf", "C:/Windows/Fonts/verdanab.ttf" },
+    { "segoeui", "Segoe UI", "C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/segoeuib.ttf" },
+    { "arial", "Arial", "C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf" },
+    { "calibri", "Calibri", "C:/Windows/Fonts/calibri.ttf", "C:/Windows/Fonts/calibrib.ttf" },
+    { "trebuc", "Trebuchet MS", "C:/Windows/Fonts/trebuc.ttf", "C:/Windows/Fonts/trebucbd.ttf" },
+    { "dejavu", "DejaVu Sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" },
+    { "noto", "Noto Sans", "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" },
+};
+static const FontFam k_fonts_mono[] = {
+    { "lucon", "Lucida Console", "C:/Windows/Fonts/lucon.ttf", "C:/Windows/Fonts/lucon.ttf" },
+    { "consola", "Consolas", "C:/Windows/Fonts/consola.ttf", "C:/Windows/Fonts/consolab.ttf" },
+    { "cour", "Courier New", "C:/Windows/Fonts/cour.ttf", "C:/Windows/Fonts/courbd.ttf" },
+    { "dejavumono", "DejaVu Sans Mono", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf" },
+    { "notomono", "Noto Sans Mono", "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf", "/usr/share/fonts/truetype/noto/NotoSansMono-Bold.ttf" },
+};
+#define NFONTS(t) (int)(sizeof t / sizeof t[0])
+
+static const FontFam *font_find(const FontFam *tbl, int n, const char *id)
+{
+    if (id && *id)
+        for (int i = 0; i < n; i++)
+            if (!strcmp(tbl[i].id, id) && FileExists(tbl[i].reg)) return &tbl[i];
+    return NULL;
+}
+
+/* next / previous installed family; the first stop is "" (default) */
+static void font_cycle(char *id, size_t idn, const FontFam *tbl, int n, int dir)
+{
+    int avail[16], na = 0, cur = 0;
+    avail[na++] = -1;
+    for (int i = 0; i < n && na < 16; i++)
+        if (FileExists(tbl[i].reg)) avail[na++] = i;
+    for (int k = 1; k < na; k++)
+        if (!strcmp(tbl[avail[k]].id, id)) cur = k;
+    cur = (cur + dir + na) % na;
+    snprintf(id, idn, "%s", avail[cur] >= 0 ? tbl[avail[cur]].id : "");
+}
+
 static void load_fonts(void)
 {
     static const char *ui[] = { "C:/Windows/Fonts/tahoma.ttf", "C:/Windows/Fonts/verdana.ttf",
@@ -118,11 +163,21 @@ static void load_fonts(void)
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
         "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf", "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf" };
 #define N(a) (int)(sizeof a / sizeof a[0])
-    F.ui = load_font(ui, N(ui), 16);
-    F.bold = load_font(bold, N(bold), 14);
-    F.title = load_font(bold, N(bold), 28);
-    F.lcd = load_font(mono, N(mono), 14);
-    F.lcd_big = load_font(mono, N(mono), 20);
+    /* the user's choice goes first, the defaults stay as fallbacks */
+    const char *ui_l[N(ui) + 1], *bold_l[N(bold) + 1], *mono_l[N(mono) + 1];
+    int nu = 0, nb = 0, nm = 0;
+    const FontFam *fu = g_st ? font_find(k_fonts_ui, NFONTS(k_fonts_ui), LK.font_ui) : NULL;
+    const FontFam *fm = g_st ? font_find(k_fonts_mono, NFONTS(k_fonts_mono), LK.font_lcd) : NULL;
+    if (fu) { ui_l[nu++] = fu->reg; if (FileExists(fu->bold)) bold_l[nb++] = fu->bold; }
+    if (fm) mono_l[nm++] = fm->reg;
+    for (int i = 0; i < N(ui); i++) ui_l[nu++] = ui[i];
+    for (int i = 0; i < N(bold); i++) bold_l[nb++] = bold[i];
+    for (int i = 0; i < N(mono); i++) mono_l[nm++] = mono[i];
+    F.ui = load_font(ui_l, nu, 16);
+    F.bold = load_font(bold_l, nb, 14);
+    F.title = load_font(bold_l, nb, 28);
+    F.lcd = load_font(mono_l, nm, 14);
+    F.lcd_big = load_font(mono_l, nm, 20);
 #undef N
 }
 
@@ -137,10 +192,11 @@ static int hexc(Color c) { return ColorToInt(c); }
 
 static Color header_top(void) { return mixc(C_SLATE_A, C_BEVEL_HI, 0.25f); }
 
-static void apply_theme(int index)
+static void apply_theme(void)
 {
-    const VfTheme *th = vf_theme_get(index);
-    for (int i = 0; i < TC_COUNT; i++) g_c[i] = (Color){ th->c[i].r, th->c[i].g, th->c[i].b, th->c[i].a };
+    VfRgba c[TC_COUNT];
+    vf_look_colors(&g_st->look, g_st->theme, c, 1);          /* theme id + custom colours + chassis hue */
+    for (int i = 0; i < TC_COUNT; i++) g_c[i] = (Color){ c[i].r, c[i].g, c[i].b, c[i].a };
 }
 
 
@@ -217,7 +273,7 @@ static void glow_text(Font f, const char *s, float x, float y, Color c)
 {
     Color g = c;
     g.a = 50;
-    for (int dx = -1; dx <= 1; dx++)
+    for (int dx = -1; dx <= 1 && LK.glow; dx++)
         for (int dy = -1; dy <= 1; dy++)
             if (dx || dy) DrawTextEx(f, s, (Vector2){ x + 2 * dx, y + 2 * dy }, (float)f.baseSize, 0, g);
     DrawTextEx(f, s, (Vector2){ x, y }, (float)f.baseSize, 0, c);
@@ -247,7 +303,7 @@ static void panel(Rectangle r, const char *title, int led)
     if (led >= 0) {
         Color c = led == 1 ? C_NEON : led == 2 ? mixc(C_NEON, C_LCD_BG, 0.62f) : C_BURG_HI;
         DrawCircle((int)x + 4, (int)(t.y + 12), 4.5f, c);
-        if (led == 1) DrawCircle((int)x + 4, (int)(t.y + 12), 8, Fade(C_NEON, 0.16f));
+        if (led == 1 && LK.glow) DrawCircle((int)x + 4, (int)(t.y + 12), 8, Fade(C_NEON, 0.16f));
         x += 16;
     }
     text(F.bold, title, x, t.y + 5, C_TITLE);
@@ -286,7 +342,7 @@ static bool onoff(Rectangle r, bool on, const char *label_on, const char *label_
 static void lcd(Rectangle r)
 {
     DrawRectangleRec(r, C_LCD_BG);
-    for (int y = (int)r.y + 1; y < (int)(r.y + r.height); y += 2)
+    for (int y = (int)r.y + 1; LK.scanlines && y < (int)(r.y + r.height); y += 2)
         DrawLine((int)r.x, y, (int)(r.x + r.width), y, (Color){ 0, 0, 0, 70 });
     /* inset bevel: dark top-left, light bottom-right */
     DrawLine((int)r.x, (int)r.y, (int)(r.x + r.width), (int)r.y, C_BEVEL_LO);
@@ -306,7 +362,7 @@ static void led_meter(Rectangle r, float db, float hold_db)
     for (int i = 0; i < n; i++) {
         const float pos = (float)(i + 1) / n;
         const float seg_db = pos * 60.0f - 60.0f;
-        Color on = seg_db > -6 ? C_RED : seg_db > -18 ? C_AMBER : C_NEON;
+        Color on = seg_db > LK.meter_clip_db ? C_RED : seg_db > LK.meter_warn_db ? C_AMBER : C_NEON;
         Color off = { (unsigned char)(on.r / 7), (unsigned char)(on.g / 7), (unsigned char)(on.b / 7), 255 };
         const int lit = pos <= t || i == hold_seg - 1;
         DrawRectangle((int)r.x + 2 + i * (seg_w + gap), (int)r.y + 3, seg_w, (int)r.height - 6, lit ? on : off);
@@ -327,9 +383,9 @@ static void led_bar(Rectangle r, float t, Color on)
 static void background(void)
 {
     DrawRectangleGradientV(0, 0, WIN_W, WIN_H, C_BG_TOP, C_BG_BOTTOM);
-    for (int x = 0; x < WIN_W; x += 24)                          /* faint blueprint grid */
+    for (int x = 0; LK.grid && x < WIN_W; x += 24)               /* faint blueprint grid */
         DrawLine(x, HEADER_H, x, WIN_H, Fade(C_TEXT, 0.03f));
-    for (int y = HEADER_H; y < WIN_H; y += 24)
+    for (int y = HEADER_H; LK.grid && y < WIN_H; y += 24)
         DrawLine(0, y, WIN_W, y, Fade(C_TEXT, 0.03f));
     /* header: brushed slate "chrome" strip with a neon underline */
     DrawRectangleGradientV(0, 0, WIN_W, HEADER_H, header_top(), C_SLATE_B);
@@ -393,13 +449,13 @@ static void drain_meters(VfSession *s, Meters *m, float dt)
             frames++;
         }
     }
-    const float fall = 30.0f * dt;
+    const float fall = LK.meter_fall * dt;
     float din = lin_to_db(pin), dout = lin_to_db(pout);
     m->peak_in = din > m->peak_in ? din : m->peak_in - fall;
     m->peak_out = dout > m->peak_out ? dout : m->peak_out - fall;
-    if (din >= m->hold_in) { m->hold_in = din; m->hold_t_in = 1.5f; }
+    if (din >= m->hold_in) { m->hold_in = din; m->hold_t_in = LK.meter_hold_s; }
     else if ((m->hold_t_in -= dt) <= 0) m->hold_in -= 20.0f * dt;
-    if (dout >= m->hold_out) { m->hold_out = dout; m->hold_t_out = 1.5f; }
+    if (dout >= m->hold_out) { m->hold_out = dout; m->hold_t_out = LK.meter_hold_s; }
     else if ((m->hold_t_out -= dt) <= 0) m->hold_out -= 20.0f * dt;
     if (frames) {
         m->vad = vad;
@@ -429,6 +485,12 @@ static unsigned long long settings_hash(const VfSession *s, const VfSettings *st
     for (const char *p = st->preset; *p; p++) MIX(*p);
     for (const char *p = st->language; *p; p++) MIX(*p);
     for (const char *p = st->theme; *p; p++) MIX(*p);
+    for (int i = 0; i < TC_COUNT; i++) MIX(st->look.custom[i]);
+    MIX(st->look.hue); MIX(st->look.opacity); MIX(st->look.topmost); MIX(st->look.grid); MIX(st->look.scanlines); MIX(st->look.glow); MIX(st->look.start_tab);
+    MIX((long long)(st->look.meter_warn_db * 10)); MIX((long long)(st->look.meter_clip_db * 10)); MIX((long long)(st->look.meter_hold_s * 10)); MIX((long long)(st->look.meter_fall * 10));
+    for (const char *p = st->look.font_ui; *p; p++) MIX(*p);
+    for (const char *p = st->look.font_lcd; *p; p++) MIX(*p);
+    for (const char *p = st->look.hidden; *p; p++) MIX(*p);
     MIX(st->compact); MIX(st->overlay); MIX(st->overlay_corner); MIX(st->per_mic); MIX(st->auto_mute_lock);
     MIX(st->auto_mute_idle_min); MIX(st->howl_guard); MIX(st->ptt_enabled); MIX(st->apps_enabled); MIX(st->sys_enabled); MIX(st->monitor_raw);
     MIX((long long)(st->monitor_gain_db * 10)); MIX((long long)(st->board_gain_db * 10));
@@ -483,16 +545,34 @@ static void style_titlebar(void)
 }
 
 /* Switches the colours of the running GUI (fonts and window stay). */
-static void retheme(int index)
+static void retheme(void)
 {
-    apply_theme(index);
+    apply_theme();
     GuiSetFont(GetFontDefault());          /* raygui frees its current font in GuiLoadStyleDefault() */
     apply_style();
     style_titlebar();
 }
 
 static int g_win_open;
-static VfSettings *g_st;                       /* settings, shared with gui_tools.inc */
+
+/* opacity and always-on-top from the Look settings (the compact window is always on top) */
+static void apply_window_look(void)
+{
+    if (!g_win_open || !g_st) return;
+    SetWindowOpacity((float)LK.opacity / 100.0f);
+    if (LK.topmost || g_st->compact) SetWindowState(FLAG_WINDOW_TOPMOST); else ClearWindowState(FLAG_WINDOW_TOPMOST);
+}
+
+/* another font family chosen on the Look tab */
+static void reload_fonts(void)
+{
+    if (!g_win_open) return;
+    GuiSetFont(GetFontDefault());          /* raygui frees its current font in GuiLoadStyleDefault() */
+    unload_fonts();
+    load_fonts();
+    apply_style();
+}
+
 
 static int window_pos_ok(int x, int y)
 {
@@ -527,6 +607,7 @@ static void window_open(int minimized)
         if (wp.x != -32000 && window_pos_ok((int)wp.x, (int)wp.y)) SetWindowPosition((int)wp.x, (int)wp.y);
         if (g_st->compact) { SetWindowSize(300, 150); SetWindowState(FLAG_WINDOW_TOPMOST); }
     }
+    apply_window_look();
 }
 
 static void remember_window_pos(void);
@@ -550,7 +631,7 @@ static void window_close(void)
 int main(int argc, char **argv)
 {
     vf_harden_process();
-    int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0, demo = 0, tab_arg = 0, cal_demo = 0;
+    int autostart = 0, mode = -1, frames_to_shot = 0, verbose = 0, minimized = 0, demo = 0, tab_arg = -1, cal_demo = 0;
     unsigned long after_update = 0;
     const char *in_file = NULL, *shot = NULL, *lang_arg = NULL;
     for (int i = 1; i < argc; i++) {
@@ -589,7 +670,7 @@ int main(int argc, char **argv)
     if (init_ok && have_settings_path) vf_settings_load(&st, &s.pipe, settings_file);
     if (lang_arg) snprintf(st.language, sizeof st.language, "%s", lang_arg);
     vf_i18n_set(vf_lang_from_code(st.language));
-    apply_theme(vf_theme_find(st.theme));
+    apply_theme();
     int autostart_on = vf_autostart_get();
 
     float *file_buf = NULL;
@@ -624,7 +705,7 @@ int main(int argc, char **argv)
     int sel_mode = mode >= 0 && mode <= 2 ? mode : (st.mode >= 0 && st.mode <= 2 ? st.mode : VF_OUT_VMIC);
     int sel_lang = (int)vf_i18n_get();
     int edit_in = 0, edit_out = 0, edit_preset = 0, edit_name = 0;
-    U.tab = tab_arg >= 0 && tab_arg <= 4 ? tab_arg : 0;     /* 0..2 effect pages, 3 tools, 4 settings (--tab N for screenshots) */
+    U.tab = tab_arg >= 0 && tab_arg < VF_LOOK_TABS ? tab_arg : st.look.start_tab;   /* 0..2 effect pages, 3 tools, 4 settings, 5 look (--tab N for screenshots) */
     if (cal_demo == VF_CAL_SPEECH || cal_demo == VF_CAL_DONE) {          /* --cal-demo 2|3: layout check of the wizard */
         vf_cal_start(&U.cal);
         U.cal.state = (VfCalState)cal_demo;
@@ -815,7 +896,7 @@ int main(int argc, char **argv)
         {   /* blinking "power" LED */
             const int on = s.running && ((int)(vf_now_s() * 2) % 2 || !atomic_load(&s.pipe.bypass_all));
             DrawCircle(WIN_W - 128, 24, 6, on ? C_NEON : C_SEG_OFF);
-            if (on) DrawCircle(WIN_W - 128, 24, 12, Fade(C_NEON, 0.18f));
+            if (on && LK.glow) DrawCircle(WIN_W - 128, 24, 12, Fade(C_NEON, 0.18f));
         }
         /* undo / redo / hold-to-compare / mute / compact */
         {
@@ -988,7 +1069,7 @@ int main(int argc, char **argv)
         }
         const int voice = s.running && m.vad >= thr;
         DrawCircle((int)(mx + mw - 10), (int)y + 9, 8, voice ? C_NEON : C_SEG_OFF);
-        if (voice) DrawCircle((int)(mx + mw - 10), (int)y + 9, 14, Fade(C_NEON, 0.2f));
+        if (voice && LK.glow) DrawCircle((int)(mx + mw - 10), (int)y + 9, 14, Fade(C_NEON, 0.2f));
         snprintf(t, sizeof t, tr(S_VAD_FMT), (int)(m.vad * 100 + 0.5f), (int)(thr * 100 + 0.5f));
         text(F.lcd, t, mx, y + 30, C_TEXT_DIM); y += 62;
 
@@ -1031,10 +1112,11 @@ int main(int argc, char **argv)
         GuiToggleGroup((Rectangle){ 282, TOP, 120, 24 }, tr(S_TABS_ALL), &U.tab);
         if (U.tab == 3) draw_tools((Rectangle){ 282, TOP + 30, 0, 0 }, &s, &st, sel_mode, sel_out, sel_mon);
         else if (U.tab == 4) draw_settings((Rectangle){ 282, TOP + 30, 0, 0 }, &s, &st, presets, n_presets, &sel_preset, tray_ok);
+        else if (U.tab == 5) draw_look((Rectangle){ 282, TOP + 30, 0, 0 }, &s, &st);
         int slot = 0;
         for (int i = 0; i < s.pipe.count && U.tab <= 2; i++) {
             Fx *fx = s.pipe.fx[i];
-            if (fx->page != U.tab) continue;
+            if (fx->page != U.tab || vf_look_hidden(&st.look, fx->name)) continue;     /* hidden = not drawn, still running */
             const float pw = 292, ph = 276;
             Rectangle box = { 282 + (slot % 3) * (pw + 6), TOP + 30 + (slot / 3) * (ph + 6), pw, ph };
             slot++;
