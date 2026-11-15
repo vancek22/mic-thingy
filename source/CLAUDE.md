@@ -328,3 +328,13 @@ against damaged downloads, not a compromised GitHub account. The download still 
 no binary delta). Tests: `test_app` ("in-place update helpers": SHA-256 vectors, verify, swap); the real WinHTTP download
 was checked against a public release asset (redirect, progress, 404, size cap), the swap against a really running exe.
 `util/sha256.[ch]` is the SHA-256. Linux (curl + fork/exec) is written but never compiled here.
+
+## nn effect weights: nsnet48k, 40 000 steps (2026-11-15)
+`src/dsp/nn_weights.c` + `tests/nn_golden.h` now come from `ml/runs/nsnet48k_gpu/best.pt` (`python ml/export_c.py <ckpt>`;
+step 40 000, val SI-SDR gain +8.01 dB; trained on the AMD GPU with MIOpen off, see ml/runs/train_gpu.py). test_fx parity
+with torch passes. Held-out set (60 x 8 s, LibriSpeech test-clean + synthetic noise, SNR 0-20 dB, `ml/evaluate.py`), the
+effect run through `mic-thingy-file` alone (RNNoise bypassed) vs the previous weights: DNSMOS OVRL 3.014 -> 3.042, BAK
+3.864 -> 3.915, STOI 0.942 -> 0.947, pause attenuation 41.7 -> 42.8 dB (RNNoise alone: 2.971 / 3.734 / 0.922 / 9.8 dB;
+noisy input 2.729 / 3.175 / 0.928). The torch models on the same set: nsnet48k 17.13 dB SI-SDR, erbdf48k (10k steps) 17.00 dB,
+DNSMOS OVRL 3.025 / 3.040 - erbdf is not in the C code (a new conv + GRU + deep-filter engine would be needed for a
+0.015 DNSMOS gain). SI-SDR of externally processed files is not comparable (delay alignment, high-pass, gate).
