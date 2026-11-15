@@ -443,11 +443,22 @@ hidden -> settings.ini `nav = 2`, the new `layout`, `hidden = rnnoise`.
   1 MB is refused. `vf_ring_write/read` copy in two `memcpy` blocks.
 - **Leak soak** (renamed dev copy, `start_processing = 0`, 60 s open + 20 x hide to tray / show via posted WM_CLOSE and WM_APP+2):
   private bytes 192-193 MB open / 124-125 MB in the tray on every cycle, handles 394-398 / 356-360, GDI objects 30 / 19 - flat.
-  USER objects grow by exactly 1 per hide/show cycle (15 -> 35 over 20 cycles; the limit is 10 000) - not found in our code
-  (tray / overlay / icons are balanced), probably GLFW or the GL driver; left as is. Tray CPU 0.00 %.
+  USER objects grew by exactly 1 per hide/show cycle (15 -> 35 over 20 cycles) - FIXED after the release, see below. Tray CPU 0.00 %.
   Started hidden (`--minimized`, never opened): 3 MB private. After the window was open once the tray keeps ~125 MB of PRIVATE
   bytes (the AMD GL driver does not give its heaps back after `CloseWindow`; only the working set is trimmed) - the 0.8-2.3 MB
   in the M1 note is working set. Fixing that needs the GUI in its own process (M2).
 - Not changed, by reasoning: the update's SHA-256 comes from the same release (no code signing); miniaudio decodes dropped
   sound files (user action); CPU of hum (+20 us), warmth (+17), voice (+18) - would change the sound.
 - No sanitizers here (MinGW GCC has none, no WSL): memory safety was checked by reading + the tests + the soak above.
+
+**USER object leak fixed (after v1.1.0.1):** the +1 per hide/show cycle came from vsync. A bare raylib loop
+(InitWindow / frames / CloseWindow, scratch test) grows by one USER object per cycle with `FLAG_VSYNC_HINT` alone and stays flat
+without it; `ClearWindowState(FLAG_VSYNC_HINT)` before `CloseWindow` or turning vsync on after creation does not help - the
+graphics driver keeps one object per GL context on `wglSwapIntervalEXT(1)` (AMD driver here). `window_open` no longer asks for vsync
+(`SetConfigFlags(0)`; the frame rate comes from `SetTargetFPS`, which raylib applies with or without vsync). Soak after the fix:
+20 cycles, USER 13 in the tray / 26 open on every cycle, GDI 19 / 30, handles 352 / 390. CPU with the focused window open
+unchanged (~13-14 % of one core, mostly raylib's partial busy-wait frame limiter, same before). Private bytes were ~50 MB lower in
+this soak, but the old build also measured 113 MB in one CPU run, so that is not a reliable gain. Also: `SetMouseCursor` is called
+only when the cursor changes (`g_cursor_set`) - raylib creates a new GLFW cursor struct on every call, freed only by CloseWindow.
+How it was found: `GetGuiResources(GR_USEROBJECTS)` logged after each step of `window_open` / `window_close` (temporary), then the
+raylib-only loop with one flag at a time. Window classes and counts (EnumWindows) stayed the same every cycle, so it was never a window.

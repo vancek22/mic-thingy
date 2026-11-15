@@ -551,6 +551,7 @@ static void style_titlebar(void)
 /* Switches the colours of the running GUI (fonts and window stay). */
 static Texture2D logo_tex;
 static int g_win_open;
+static int g_cursor_set = -1;                  /* cursor last handed to raylib, -1 = none yet for this window */
 
 /* header logo and window icon in the theme's accent colour (the logo follows the accent) */
 static void update_logo(void)
@@ -604,7 +605,12 @@ static int window_pos_ok(int x, int y)
 
 static void window_open(int minimized)
 {
-    SetConfigFlags(FLAG_VSYNC_HINT);               /* no MSAA: the UI is rectangles + bitmap text */
+    /* No MSAA (the UI is rectangles + bitmap text) and no vsync: the frame rate comes from SetTargetFPS. Turning vsync on
+     * (wglSwapIntervalEXT) makes the graphics driver keep one USER object per GL context that is never released, and
+     * every hide-to-tray / show cycle creates a new context: +1 per cycle for the life of the process (measured on
+     * this machine's AMD driver, also with vsync switched off again before CloseWindow). */
+    SetConfigFlags(0);
+    g_cursor_set = -1;
     InitWindow(WIN_W, WIN_H, "mic thingy");
     SetWindowState(FLAG_WINDOW_ALWAYS_RUN);        /* keep the loop alive while minimized */
     SetExitKey(KEY_NULL);                          /* Esc must not quit */
@@ -1380,7 +1386,9 @@ int main(int argc, char **argv)
         }
 
         ui_handle_drops(&s, &st);
-        SetMouseCursor(cursor);
+        /* only on a change: raylib creates a new GLFW cursor on every call (freed only by CloseWindow), so calling it every
+         * frame while the pointer rests on a value box would allocate 60 cursors a second */
+        if (cursor != g_cursor_set) { SetMouseCursor(cursor); g_cursor_set = cursor; }
         EndDrawing();
 
         if (shot && ++frame_no >= (frames_to_shot > 0 ? frames_to_shot : 60)) {
