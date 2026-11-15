@@ -424,6 +424,41 @@ static void test_aec(void)
     CHECK(add_keys < -20.0, "system sound leaks into the pauses: %.1f dB relative to the microphone", add_keys);
     CHECK(add_voice < -6.0, "voice altered by %.1f dB without any echo", add_voice);
     f3.destroy(&f3);
+
+    /* Speakers: real echo. The far end turns very quiet (-56 dBFS) for 3 s while the near end talks, then plays again.
+     * The echo must be cancelled again at once (a weight decay tried for the headset case lost it for 5+ s). */
+    enum { P = SR * 16 };
+    float lp2 = 0.0f;
+    for (long i = 0; i < P; i++) {
+        lp2 = 0.9f * lp2 + 0.1f * noise();
+        const int gap = i >= SR * 8 && i < SR * 11;
+        x[i] = (gap ? 0.01f : 1.0f) * 1.2f * lp2 * (0.6f + 0.4f * sinf(2.0f * 3.14159f * 0.7f * (float)i / SR));
+        double v = 0;
+        if (gap) { for (int h = 1; h <= 12; h++) v += sin(2.0 * PI * 130.0 * h * (double)i / SR) / h; v *= 0.12 * (0.5 + 0.5 * sin(2.0 * PI * 3.0 * (double)i / SR)); }
+        s[i] = (float)v;
+    }
+    for (long i = 0; i < P; i++) {
+        float e = 0;
+        for (int k = 0; k < 3; k++) if (i >= dly[k]) e += gain[k] * x[i - dly[k]];
+        d[i] = e + s[i];
+    }
+    Fx f4; fx_aec_make(&f4); start(&f4);
+    f4.set_param(&f4, AEC_DELAY_MS, 30.0f);
+    fx_aec_attach(&f4, &ref);
+    vf_sink_flush(&ref);
+    vf_sink_write(&ref, zeros, 480);
+    for (long off = 0; off + VF_FRAME_SIZE <= P; off += VF_FRAME_SIZE) {
+        vf_sink_write(&ref, x + off, VF_FRAME_SIZE);
+        FxFrameCtx ctx = { 0 };
+        memcpy(out + off, d + off, VF_FRAME_SIZE * sizeof(float));
+        f4.process(&f4, out + off, VF_FRAME_SIZE, &ctx);
+    }
+    double ei = 0, eo = 0;
+    for (long i = SR * 11 + 4800; i < SR * 12; i++) { const double ech = (double)d[i] - s[i], res = (double)out[i] - s[i]; ei += ech * ech; eo += res * res; }
+    const double resume = 10.0 * log10(ei / (eo + 1e-20));
+    printf("  speakers, far end quiet for 3 s while talking: echo reduction in the first second after it resumes %.1f dB\n", resume);
+    CHECK(resume > 20.0, "echo not cancelled after the far end resumed: %.1f dB", resume);
+    f4.destroy(&f4);
     vf_sink_free(&ref);
 }
 

@@ -471,10 +471,20 @@ the microphone itself (real recordings: Polish speech + keyboard as the mic, Eng
 `fx_aec.c`: (1) step size `mu e / (en + AEC_NEAR_K * TAPS * pe)` - the power the reference does not explain slows adaptation
 (K = 30: 10 / 30 / 100 compared; 30 kept ERLE 66.6 dB and the best real-recording numbers); (2) the estimate is subtracted only
 by `apply` = smoothed projection <d,y>/<y,y> clamped 0..1 (true echo ~1, unrelated estimate ~0), ramped per frame, and cut to
-this frame's own projection when the smoothed share would make the frame louder than the mic by > 10 % of its energy; weights
-decay (x0.97 per frame) while the share stays < 0.3. Results, real recordings, ref at -32 / -21 / -12 dBFS: added in the pauses
+this frame's own projection when the smoothed share would make the frame louder than the mic by > 10 % of its energy. NO weight
+decay: a first version shrank the weights while the share was < 0.3 - with speakers, when the far end went quiet (-56 dBFS, not
+silent) while the user talked, the echo was then uncancelled for 5+ s after it resumed (0.3 dB instead of 61 dB); removing it
+changed nothing measurable in the headset case. Results, real recordings, ref at -32 / -21 / -12 dBFS: added in the pauses
 v1.1.0.2 +14.5 / +23.6 / +27.2 dB rel. mic (-52 / -43 / -39 dBFS) -> fixed -7.5 / -7.4 / -8.2 dB (-74 dBFS, mic -66); while
 speaking -5.9 / +7.3 / +10.5 -> -24.8 / -13.1 / -4.7 dB. Synthetic room echo test: ERLE 67.9 -> 66.6 dB, double-talk SDR 8.2 -> 7.9 dB.
 New `test_fx` case "no echo path (headset)": music reference, voice then keys, the canceller must change the mic by < -20 dB in
-the keys part (old: +12.2 dB, fails; new -26.3 dB). CPU: `+ aec` ~130-145 us per frame (noisy, unchanged order).
+the keys part (old: +12.2 dB, fails; new -26.3 dB). Second new case "speakers, far end quiet for 3 s": echo reduction in the
+first second after it resumes must be > 20 dB (60.9 dB; the decay version: 0.3 dB, fails). CPU: `+ aec` ~130-145 us per frame.
+Full chain with the user's settings (scratch harness: `chain_build` + their [fx.*] as console commands + a reference sink;
+`mic-thingy-file` has no loopback, there the canceller is inert): mic = speech, then 7 s of keys at -41 dBFS, reference = babble.
+v1.1.0.2: keys-only output -47 / -52 / -58 dBFS for a reference at -32 / -21 / -12 dBFS, the gate opened on 22 / 12 / 41 % of
+those frames (nn's VAD reacted to the injected voices), 0.3 s after speech -30 / -27 / -48 dBFS. Fixed: keys-only -162 / -138 /
+-128 dBFS (gate never opens), 0.3 s after speech -43 dBFS. Without a reference the rest of the chain (erbdf, gate 0.79, breath)
+silences the keys completely (-163 dBFS) - so the artifact only exists while the PC plays sound. `mic-thingy-file` takes up to
+128 `-c` commands now (a full [fx.*] section is ~70).
 Not done: real-room echo was never recorded here; the user still has to listen. With headphones the canceller is not needed at all.

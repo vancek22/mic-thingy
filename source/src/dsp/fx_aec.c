@@ -122,7 +122,7 @@ static void aec_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
      * with the microphone (projection <d,y>/<y,y> near 1); weights that learned something else produce an estimate
      * that does not, and subtracting it would ADD the system sound to the microphone (headset: no echo at all, the
      * music was audible in the pauses). The share follows the smoothed projection, clamped to 0..1, ramped over the
-     * frame; the output can therefore not get louder than the microphone on average. Useless weights fade out. */
+     * frame; the output can therefore not get louder than the microphone on average. */
     s->sdy += 0.25f * ((float)fdy - s->sdy);
     s->syy += 0.25f * ((float)fyy - s->syy);
     float want = s->syy > 1e-9f ? vf_clampf(s->sdy / s->syy, 0.0f, 1.0f) : 0.0f;
@@ -138,8 +138,9 @@ static void aec_process(Fx *fx, float *buf, int n, FxFrameCtx *ctx)
         buf[i] -= a * ybuf[i];
     }
     s->apply = want;
-    if (want < 0.3f && s->syy > 1e-9f)
-        for (int k = 0; k < AEC_TAPS; k++) s->w[k] *= 0.97f;
+    /* No weight decay while the share is low: with speakers the far end often goes quiet while you talk, the share drops,
+     * and decayed weights could not be relearned before the double-talk freeze let go (measured: echo uncancelled for
+     * 5+ s after the far end resumed). Unused weights cost nothing - the share keeps them out of the output. */
 }
 
 static void aec_set_param(Fx *fx, int id, float v)

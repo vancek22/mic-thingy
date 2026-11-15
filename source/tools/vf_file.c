@@ -20,7 +20,7 @@
 #include <xmmintrin.h>
 #endif
 
-#define MAX_CMDS 32
+#define MAX_CMDS 128
 
 static void usage(void)
 {
