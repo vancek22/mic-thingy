@@ -22,8 +22,9 @@ static float clampf(float v, float a, float b) { return v < a ? a : v > b ? b : 
 #define GRAPHITE   rgb(22, 26, 33)
 #define SLATE_LO   rgb(30, 34, 43)
 #define SILVER     rgb(150, 162, 186)
-#define NEON       rgb(57, 255, 20)
-#define GREEN_BTN  rgb(40, 168, 32)
+typedef struct { Col neon, btn; } Pal;       /* accent colours: the GUI theme can change them */
+#define NEON       (pal->neon)
+#define GREEN_BTN  (pal->btn)
 #define BURGUNDY   rgb(128, 22, 52)
 #define BURG_HI    rgb(196, 60, 96)
 #define LCD        rgb(9, 11, 15)
@@ -64,7 +65,7 @@ static float bezier_dist(float px, float py, float ax, float ay, float bx, float
 }
 
 /* LED level meter in the lower-left corner of the screen (like the GUI meters) */
-static int meter(float x, float y, int active, int detail, Col *out)
+static int meter(const Pal *pal, float x, float y, int active, int detail, Col *out)
 {
     if (!detail) return 0;
     static const float heights[4] = { 2.4f, 3.9f, 5.4f, 4.4f };
@@ -85,7 +86,7 @@ static int meter(float x, float y, int active, int detail, Col *out)
     return 0;
 }
 
-static Col mic(float x, float y, int active, int detail, int *hit)
+static Col mic(const Pal *pal, float x, float y, int active, int detail, int *hit)
 {
     const float c = cosf(MIC_ANG), s = sinf(MIC_ANG);
     const float u = (x - MIC_CX) * c + (y - MIC_CY) * s;    /* along the mic, + = grille end */
@@ -136,7 +137,7 @@ static Col mic(float x, float y, int active, int detail, int *hit)
     return detail ? body : mix(body, SILVER, 0.35f);                 /* lighter at icon sizes */
 }
 
-static Col screen(float x, float y, int active, int detail)
+static Col screen(const Pal *pal, float x, float y, int active, int detail)
 {
     Col c = LCD;
     if (detail) {
@@ -153,7 +154,7 @@ static Col screen(float x, float y, int active, int detail)
     return c;
 }
 
-static Col sample(float x, float y, int active, int detail)
+static Col sample(const Pal *pal, float x, float y, int active, int detail)
 {
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return (Col){ 0, 0, 0, 0 };
     /* outer ink line; right/bottom = graphite shadow side of the bevel */
@@ -173,14 +174,14 @@ static Col sample(float x, float y, int active, int detail)
     if (x < 6.2f || y < 6.2f) return rgb(2, 3, 4);
     if (x >= 29.3f || y >= 29.3f) return LCD_EDGE;
     int hit;
-    Col m = mic(x, y, active, detail, &hit);
+    Col m = mic(pal, x, y, active, detail, &hit);
     if (hit) return m;
     Col led;
-    if (meter(x, y, active, detail, &led)) return led;
-    return screen(x, y, active, detail);
+    if (meter(pal, x, y, active, detail, &led)) return led;
+    return screen(pal, x, y, active, detail);
 }
 
-void vf_icon_render(unsigned char *rgba, int size, int active)
+static void render(const Pal *pal, unsigned char *rgba, int size, int active)
 {
     const int ss = size >= 256 ? 2 : size >= 64 ? 3 : 4;
     const int detail = size >= 40;            /* grid, scanlines and meter only where they read */
@@ -191,7 +192,7 @@ void vf_icon_render(unsigned char *rgba, int size, int active)
             for (int sy = 0; sy < ss; sy++)
                 for (int sx = 0; sx < ss; sx++) {
                     const float x = (px + (sx + 0.5f) / ss) * scale, y = (py + (sy + 0.5f) / ss) * scale;
-                    const Col c = sample(x, y, active, detail);
+                    const Col c = sample(pal, x, y, active, detail);
                     r += c.r * c.a; g += c.g * c.a; b += c.b * c.a; a += c.a;
                 }
             unsigned char *o = rgba + 4 * (py * size + px);
@@ -201,4 +202,17 @@ void vf_icon_render(unsigned char *rgba, int size, int active)
             o[1] = a > 0 ? (unsigned char)(g / a + 0.5f) : 0;
             o[2] = a > 0 ? (unsigned char)(b / a + 0.5f) : 0;
         }
+}
+
+void vf_icon_render(unsigned char *rgba, int size, int active)
+{
+    const Pal pal = { rgb(57, 255, 20), rgb(40, 168, 32) };
+    render(&pal, rgba, size, active);
+}
+
+void vf_icon_render_accent(unsigned char *rgba, int size, int active, unsigned accent_rgb, unsigned button_rgb)
+{
+    const Pal pal = { rgb((int)(accent_rgb >> 16 & 255), (int)(accent_rgb >> 8 & 255), (int)(accent_rgb & 255)),
+                      rgb((int)(button_rgb >> 16 & 255), (int)(button_rgb >> 8 & 255), (int)(button_rgb & 255)) };
+    render(&pal, rgba, size, active);
 }

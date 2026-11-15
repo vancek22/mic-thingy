@@ -752,6 +752,104 @@ static void test_look(void)
     CHECK(r.look.opacity == 100 && r.look.grid == 0 && r.look.font_ui[0] == '\0' && !strcmp(r.look.hidden, "oice,comp"), "garbage in [look] is sanitised (%s)", r.look.hidden);
 }
 
+static void test_look_styles_layout(void)
+{
+    printf("look: main colour, styles, panel layout\n");
+    /* hsv helpers */
+    float h, s, v;
+    vf_rgb_hsv(0x395cbf, &h, &s, &v);
+    CHECK(fabsf(h - 222.0f) < 3.0f && fabsf(s - 0.70f) < 0.03f, "graphite main colour: hue %.0f, intensity %.2f", (double)h, (double)s);
+    CHECK(vf_hsv_rgb(120.0f, 1.0f, 1.0f) == 0x00ff00u && vf_hsv_rgb(0.0f, 0.0f, 0.5f) == 0x808080u && vf_hsv_rgb(-120.0f, 1.0f, 1.0f) == 0x0000ffu, "hsv -> rgb");
+
+    /* the default main colour regenerates the graphite chassis closely */
+    VfLook l;
+    vf_look_defaults(&l);
+    vf_look_set_main(&l, l.main_rgb, 1.0f);
+    const VfTheme *g = vf_theme_get(0);
+    int worst = 0;
+    const int chassis[] = { TC_BG_TOP, TC_BG_BOTTOM, TC_PANEL, TC_BEVEL_HI, TC_EDGE, TC_SLATE_A, TC_SLATE_B, TC_TEXT, TC_TEXT_DIM, TC_TITLE, TC_LCD_BG, TC_SEG_OFF };
+    for (int k = 0; k < 12; k++) {
+        const unsigned c = l.custom[chassis[k]];
+        const VfRgba want = g->c[chassis[k]];
+        const int d = abs((int)(c >> 16 & 255) - want.r) + abs((int)(c >> 8 & 255) - want.g) + abs((int)(c & 255) - want.b);
+        if (d > worst) worst = d;
+    }
+    CHECK(worst <= 24, "main colour generator reproduces graphite (worst channel sum %d)", worst);
+    CHECK(l.custom[TC_ACCENT] == 0x39ff14u && l.custom[TC_OFF] == 0x801634u, "the main colour leaves accent and OFF alone");
+
+    /* every style is readable and keeps ON / OFF / warning apart, also at the extreme brightness values */
+    for (int i = 0; i < vf_look_preset_count(); i++) {
+        VfLook p;
+        vf_look_defaults(&p);
+        char theme[16] = "graphite";
+        vf_look_use_preset(&p, theme, sizeof theme, i);
+        const VfLookPreset *pr = vf_look_preset(i);
+        VfRgba c[TC_COUNT];
+        vf_look_colors(&p, theme, c, 1);
+        CHECK(!strcmp(p.preset, pr->id) && (pr->theme ? !strcmp(theme, pr->theme) : !strcmp(theme, "custom")), "%s applied", pr->id);
+        CHECK(pr->name_en[0] && pr->name_pl[0], "%s has names", pr->id);
+        CHECK(rgb_dist(c[TC_ACCENT], c[TC_OFF]) > 90 && rgb_dist(c[TC_OFF], c[TC_WARN]) > 90 && rgb_dist(c[TC_ACCENT], c[TC_WARN]) > 60,
+              "%s: ON / OFF / warning distinct (%d %d %d)", pr->id, rgb_dist(c[TC_ACCENT], c[TC_OFF]), rgb_dist(c[TC_OFF], c[TC_WARN]), rgb_dist(c[TC_ACCENT], c[TC_WARN]));
+        CHECK(abs(luma(c[TC_TEXT]) - luma(c[TC_PANEL])) > 100 && abs(luma(c[TC_ACCENT]) - luma(c[TC_LCD_BG])) > 60,
+              "%s: text and values readable (%d / %d)", pr->id, abs(luma(c[TC_TEXT]) - luma(c[TC_PANEL])), abs(luma(c[TC_ACCENT]) - luma(c[TC_LCD_BG])));
+        for (float b = 0.6f; b <= 1.81f && !pr->theme; b += 1.2f) {
+            VfLook q = p;
+            vf_look_set_main(&q, pr->main, b);
+            vf_look_colors(&q, "custom", c, 1);
+            CHECK(abs(luma(c[TC_TEXT]) - luma(c[TC_PANEL])) > 100 && abs(luma(c[TC_TITLE]) - luma(c[TC_SLATE_B])) > 100,
+                  "%s brightness %.1f: text readable", pr->id, (double)b);
+        }
+    }
+    VfLook ac;
+    vf_look_defaults(&ac);
+    vf_look_set_accent(&ac, 0xff40c8);
+    CHECK(ac.custom[TC_ACCENT] == 0xff40c8u && ac.custom[TC_ON_BTN] == 0x992678u, "accent sets the ON button too (0x%06x)", ac.custom[TC_ON_BTN]);
+
+    /* panel layout: default = chain order and built-in pages */
+    const char *names[] = { "highpass", "aec", "rnnoise", "gate", "comp", "voice", "limiter" };
+    const int defp[] = { 0, 1, 0, 0, 0, 2, 0 };
+    const int n = 7;
+    int order[8], page[8];
+    VfLook lay;
+    vf_look_defaults(&lay);
+    vf_look_layout(&lay, names, defp, n, order, page);
+    int same = 1;
+    for (int i = 0; i < n; i++) same &= order[i] == i && page[i] == defp[i];
+    CHECK(same, "empty layout = chain order, built-in pages");
+    /* move limiter in front of rnnoise on the basic page */
+    CHECK(vf_look_move(&lay, names, defp, n, 6, 0, 2) == 0, "move");
+    vf_look_layout(&lay, names, defp, n, order, page);
+    CHECK(order[0] == 0 && order[1] == 1 && order[2] == 6 && order[3] == 2 && page[6] == 0, "limiter now before rnnoise (%s)", lay.layout);
+    /* move gate to the effects page (appended after voice) */
+    CHECK(vf_look_move(&lay, names, defp, n, 3, 2, -1) == 0, "move to another page");
+    vf_look_layout(&lay, names, defp, n, order, page);
+    int pos_voice = -1, pos_gate = -1;
+    for (int i = 0; i < n; i++) { if (order[i] == 5) pos_voice = i; if (order[i] == 3) pos_gate = i; }
+    CHECK(page[3] == 2 && pos_gate == pos_voice + 1, "gate is on the effects page right after voice (%s)", lay.layout);
+    /* move to the end of a page that has no panels yet ends up last */
+    CHECK(vf_look_move(&lay, names, defp, n, 0, 1, -1) == 0, "move to the extra page");
+    vf_look_layout(&lay, names, defp, n, order, page);
+    CHECK(page[0] == 1, "highpass on page 1");
+    CHECK(vf_look_move(&lay, names, defp, n, 0, 5, -1) != 0 && vf_look_move(&lay, names, defp, n, 0, 0, 0) != 0 && vf_look_move(&lay, names, defp, n, 9, 0, -1) != 0,
+          "bad page / self / index refused");
+    /* the layout survives text and settings round trips; unknown and duplicate names are ignored */
+    char text[4096], theme[16] = "graphite";
+    vf_look_to_text(&lay, "graphite", text, sizeof text);
+    VfLook back;
+    vf_look_defaults(&back);
+    vf_look_from_text(&back, theme, sizeof theme, text);
+    CHECK(!strcmp(back.layout, lay.layout), "layout survives the text round trip");
+    VfLook junk;
+    vf_look_defaults(&junk);
+    vf_look_apply(&junk, "layout", "nope:1,limiter:9,limiter:0,gate:2,EVIL;rm");
+    vf_look_layout(&junk, names, defp, n, order, page);
+    CHECK(order[0] == 6 && page[6] == 2 && order[1] == 3 && page[3] == 2 && page[0] == 0, "junk layout: clamped page, duplicates and unknown names ignored (%s)", junk.layout);
+    int seen[8] = { 0 }, all = 1;
+    for (int i = 0; i < n; i++) seen[order[i]]++;
+    for (int i = 0; i < n; i++) all &= seen[i] == 1;
+    CHECK(all, "every effect appears exactly once in the order");
+}
+
 static void test_settings_ext(void)
 {
     printf("settings: new fields, profiles, export/import\n");
@@ -1228,6 +1326,7 @@ int main(void)
     test_appwatch();
     test_themes();
     test_look();
+    test_look_styles_layout();
     test_settings_ext();
     test_recorder();
     test_spectrum_and_scope();

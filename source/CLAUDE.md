@@ -378,3 +378,21 @@ removed by the new instance, header "v1.0.3.5", settings untouched (clicks were 
 Gotcha when testing: ANY `mic-thingy.exe` started later (also a dev build or `--screenshot` run) refreshes the Start-menu copy
 `%LOCALAPPDATA%\Programs\mic thingy\mic-thingy.exe` when its size or time differs - do not run dev builds while a release copy is
 installed for an update test. Versions can have a 4th number (revision): v1.0.3.5 > v1.0.3, compared numerically.
+
+## Look tab v2: styles, main colour, draggable panels, logo in the accent (2026-11-15, v1.0.4.0)
+- **Styles** (panel 1): 12 ready-made looks (`vf_look_preset*` in app/look.c: the 3 built-in themes + 9 generated from a main
+  colour + accent); the 20-colour editor moved behind "Edit single colours...". `[look] preset` remembers the last one ("" after
+  a manual change).
+- **Main colour** (panel 2): `vf_look_set_main()` regenerates the 13 chassis colours of the custom theme from one colour's hue and
+  intensity (table `k_chassis`, measured on graphite: main #395cbf reproduces it within 24 RGB steps) times a brightness
+  0.6..1.8; accent / OFF / warning / error stay. Accent chips set accent + ON button (`vf_look_set_accent`). Tests: every style
+  keeps ON/OFF/warning apart and text readable, also at brightness 0.6 and 1.8.
+- **Draggable panels**: press a panel's title strip (left of ON/OFF and Reset) and drop it on another place of the 3 x 2 grid,
+  or on the Basic / Extra / Effects tab to move it there (max 6 visible per page; refused with a note). Order + page are
+  `[look] layout = name:page,...` (`vf_look_layout` / `vf_look_move`, tested incl. junk input); only drawing changes, the audio
+  chain order is untouched. "Reset panel order" on the Look tab. GuiLock() while carrying, so no slider grabs the mouse.
+- **Logo**: `vf_icon_render_accent()` draws the header logo and the window icon with the theme's accent + ON-button colours,
+  re-rendered by `retheme()` (`update_logo()`); the tray / overlay keep the default green art.
+- New look keys are in `settings_hash()` (they were missing at first: layout changes were not autosaved - caught by the
+  posted-mouse drag test). Dev screenshots/click tests now run a renamed copy (`mt-dev.exe`) so the installed Start-menu copy
+  is not overwritten.

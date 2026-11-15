@@ -491,6 +491,9 @@ static unsigned long long settings_hash(const VfSession *s, const VfSettings *st
     for (const char *p = st->look.font_ui; *p; p++) MIX(*p);
     for (const char *p = st->look.font_lcd; *p; p++) MIX(*p);
     for (const char *p = st->look.hidden; *p; p++) MIX(*p);
+    MIX(st->look.main_rgb); MIX((long long)(st->look.main_bright * 100));
+    for (const char *p = st->look.preset; *p; p++) MIX(*p);
+    for (const char *p = st->look.layout; *p; p++) MIX(*p);
     MIX(st->compact); MIX(st->overlay); MIX(st->overlay_corner); MIX(st->per_mic); MIX(st->auto_mute_lock);
     MIX(st->auto_mute_idle_min); MIX(st->howl_guard); MIX(st->ptt_enabled); MIX(st->apps_enabled); MIX(st->sys_enabled); MIX(st->monitor_raw);
     MIX((long long)(st->monitor_gain_db * 10)); MIX((long long)(st->board_gain_db * 10));
@@ -545,15 +548,33 @@ static void style_titlebar(void)
 }
 
 /* Switches the colours of the running GUI (fonts and window stay). */
+static Texture2D logo_tex;
+static int g_win_open;
+
+/* header logo and window icon in the theme's accent colour (the logo follows the accent) */
+static void update_logo(void)
+{
+    if (!g_win_open) return;
+    const unsigned acc = (unsigned)C_NEON.r << 16 | (unsigned)C_NEON.g << 8 | C_NEON.b;
+    const unsigned btn = (unsigned)C_GREEN_BTN.r << 16 | (unsigned)C_GREEN_BTN.g << 8 | C_GREEN_BTN.b;
+    static unsigned char px[64 * 64 * 4];
+    vf_icon_render_accent(px, 64, 1, acc, btn);
+    SetWindowIcon((Image){ px, 64, 64, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 });
+    /* rendered at its display size (36 px) so it gets the icon-size variant */
+    static unsigned char logo_px[36 * 36 * 4];
+    vf_icon_render_accent(logo_px, 36, 1, acc, btn);
+    if (logo_tex.id) UnloadTexture(logo_tex);
+    logo_tex = LoadTextureFromImage((Image){ logo_px, 36, 36, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 });
+}
+
 static void retheme(void)
 {
     apply_theme();
     GuiSetFont(GetFontDefault());          /* raygui frees its current font in GuiLoadStyleDefault() */
     apply_style();
     style_titlebar();
+    update_logo();
 }
-
-static int g_win_open;
 
 /* opacity and always-on-top from the Look settings (the compact window is always on top) */
 static void apply_window_look(void)
@@ -579,7 +600,6 @@ static int window_pos_ok(int x, int y)
     const int mon = GetCurrentMonitor();
     return x > -200 && y > -20 && x < GetMonitorWidth(mon) - 100 && y < GetMonitorHeight(mon) - 100;
 }
-static Texture2D logo_tex;
 
 static void window_open(int minimized)
 {
@@ -591,17 +611,11 @@ static void window_open(int minimized)
     if (minimized) MinimizeWindow();
     /* window icon (Windows also gets it from the .exe resource) and a title bar in the
      * header colour instead of the white system one */
-    static unsigned char px[64 * 64 * 4];
-    vf_icon_render(px, 64, 1);
-    SetWindowIcon((Image){ px, 64, 64, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 });
     style_titlebar();
-    /* header logo rendered at its display size (36 px) so it gets the icon-size variant */
-    static unsigned char logo_px[36 * 36 * 4];
-    vf_icon_render(logo_px, 36, 1);
-    logo_tex = LoadTextureFromImage((Image){ logo_px, 36, 36, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 });
     load_fonts();
     apply_style();
     g_win_open = 1;
+    update_logo();                                 /* window icon + header logo in the theme accent */
     if (g_st) {
         const Vector2 wp = { (float)(g_st->compact ? g_st->cwin_x : g_st->win_x), (float)(g_st->compact ? g_st->cwin_y : g_st->win_y) };
         if (wp.x != -32000 && window_pos_ok((int)wp.x, (int)wp.y)) SetWindowPosition((int)wp.x, (int)wp.y);
@@ -620,6 +634,7 @@ static void window_close(void)
      * point it back to the built-in font first, or reopening the window frees our fonts twice. */
     GuiSetFont(GetFontDefault());
     UnloadTexture(logo_tex);
+    logo_tex.id = 0;
     unload_fonts();
     CloseWindow();
     g_win_open = 0;
@@ -705,6 +720,7 @@ int main(int argc, char **argv)
     int sel_mode = mode >= 0 && mode <= 2 ? mode : (st.mode >= 0 && st.mode <= 2 ? st.mode : VF_OUT_VMIC);
     int sel_lang = (int)vf_i18n_get();
     int edit_in = 0, edit_out = 0, edit_preset = 0, edit_name = 0;
+    U.drag_fx = -1;
     U.tab = tab_arg >= 0 && tab_arg < VF_LOOK_TABS ? tab_arg : st.look.start_tab;   /* 0..2 effect pages, 3 tools, 4 settings, 5 look (--tab N for screenshots) */
     if (cal_demo == VF_CAL_SPEECH || cal_demo == VF_CAL_DONE) {          /* --cal-demo 2|3: layout check of the wizard */
         vf_cal_start(&U.cal);
@@ -1114,14 +1130,29 @@ int main(int argc, char **argv)
         else if (U.tab == 4) draw_settings((Rectangle){ 282, TOP + 30, 0, 0 }, &s, &st, presets, n_presets, &sel_preset, tray_ok);
         else if (U.tab == 5) draw_look((Rectangle){ 282, TOP + 30, 0, 0 }, &s, &st);
         int slot = 0;
-        for (int i = 0; i < s.pipe.count && U.tab <= 2; i++) {
+        /* panel order and page come from the Look layout: a panel is dragged by its title strip */
+        const char *fx_names[VF_MAX_FX];
+        int fx_defp[VF_MAX_FX], fx_ord[VF_MAX_FX], fx_pg[VF_MAX_FX];
+        const int nfx = s.pipe.count;
+        for (int q = 0; q < nfx; q++) { fx_names[q] = s.pipe.fx[q]->name; fx_defp[q] = s.pipe.fx[q]->page; }
+        vf_look_layout(&st.look, fx_names, fx_defp, nfx, fx_ord, fx_pg);
+        if (U.drag_fx >= 0) GuiLock();                         /* no slider grabs the mouse while a panel is carried */
+        for (int oi = 0; oi < nfx && U.tab <= 2; oi++) {
+            const int i = fx_ord[oi];
             Fx *fx = s.pipe.fx[i];
-            if (fx->page != U.tab || vf_look_hidden(&st.look, fx->name)) continue;     /* hidden = not drawn, still running */
+            if (fx_pg[i] != U.tab || vf_look_hidden(&st.look, fx->name) || slot >= 6) continue;   /* hidden = not drawn, still running */
             const float pw = 292, ph = 276;
             Rectangle box = { 282 + (slot % 3) * (pw + 6), TOP + 30 + (slot / 3) * (ph + 6), pw, ph };
             slot++;
             bool on = !atomic_load(&fx->bypass);
             panel(box, tr_fx(fx->name), !on ? 0 : (s.running && !atomic_load(&s.pipe.bypass_all)) ? 1 : 2);
+            if (U.drag_fx == i) DrawRectangleRec(box, Fade(C_BG_BOTTOM, 0.6f));   /* the carried panel's old place */
+            if (U.drag_fx < 0 && !GuiIsLocked() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+                CheckCollisionPointRec(mouse, (Rectangle){ box.x + 4, box.y + 4, box.width - 140, 24 })) {
+                U.drag_fx = i;                                  /* title strip left of ON/OFF and Reset */
+                U.drag_dx = mouse.x - box.x; U.drag_dy = mouse.y - box.y;
+                U.drag_sx = mouse.x; U.drag_sy = mouse.y; U.drag_moved = 0;
+            }
             GuiSetStyle(DEFAULT, TEXT_SIZE, 14);
             GuiSetFont(F.bold);
             const bool non = onoff((Rectangle){ box.x + box.width - 128, box.y + 6, 44, 20 }, on, "ON", "OFF");
@@ -1203,6 +1234,7 @@ int main(int argc, char **argv)
             }
             GuiEnable();
         }
+        if (U.drag_fx >= 0) drag_panel(&st, mouse, fx_names, fx_defp, fx_ord, fx_pg, nfx);
 
         /* ---- status bar: LCD strip ---- */
         char sb[600];

@@ -10,6 +10,10 @@
 typedef struct Ui {
     int tab;                                /* 0..2 effect pages, 3 tools, 4 settings, 5 look */
     int look_sel;                           /* colour selected in the Look tab (TC_*) */
+    int look_adv;                           /* Look tab: single-colour editor open */
+    int drag_fx;                            /* effect panel being dragged, -1 = none */
+    float drag_dx, drag_dy, drag_sx, drag_sy;
+    int drag_moved;
     int compact;
     VfUndo undo;
     VfSnap seen, cmp_snap;

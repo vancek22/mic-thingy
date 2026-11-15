@@ -101,6 +101,9 @@ void vf_look_defaults(VfLook *l)
     l->meter_clip_db = -6.0f;
     l->meter_hold_s = 1.5f;
     l->meter_fall = 30.0f;
+    l->main_rgb = 0x395cbf;                                      /* hue 222, intensity 0.67 = the graphite chassis */
+    l->main_bright = 1.0f;
+    snprintf(l->preset, sizeof l->preset, "graphite");
 }
 
 static int truthy(const char *v) { return v && (atoi(v) != 0 || !strcmp(v, "true") || !strcmp(v, "on")); }
@@ -143,6 +146,27 @@ int vf_look_apply(VfLook *l, const char *key, const char *value)
     if (!strcmp(key, "meter_clip")) { l->meter_clip_db = clampf((float)atof(value), -20.0f, 0.0f); return 1; }
     if (!strcmp(key, "meter_hold")) { l->meter_hold_s = clampf((float)atof(value), 0.0f, 10.0f); return 1; }
     if (!strcmp(key, "meter_fall")) { l->meter_fall = clampf((float)atof(value), 5.0f, 120.0f); return 1; }
+    if (!strcmp(key, "main")) {
+        int ok;
+        const unsigned v = vf_rgb_parse(value, &ok);
+        if (ok) l->main_rgb = v;
+        return ok;
+    }
+    if (!strcmp(key, "main_bright")) { l->main_bright = clampf((float)atof(value), 0.6f, 1.8f); return 1; }
+    if (!strcmp(key, "preset")) {
+        if (*value && !id_ok(value)) return 0;
+        snprintf(l->preset, sizeof l->preset, "%s", value);
+        return 1;
+    }
+    if (!strcmp(key, "layout")) {
+        char clean[VF_LOOK_LAYOUT_MAX];
+        size_t n = 0;
+        for (const char *p = value; *p && n + 1 < sizeof clean; p++)
+            if (islower((unsigned char)*p) || isdigit((unsigned char)*p) || *p == '_' || *p == ',' || *p == ':') clean[n++] = *p;
+        clean[n] = '\0';
+        snprintf(l->layout, sizeof l->layout, "%s", clean);
+        return 1;
+    }
     if (!strcmp(key, "hidden")) {
         char clean[VF_LOOK_HIDDEN_MAX];
         size_t n = 0;
@@ -158,7 +182,7 @@ int vf_look_apply(VfLook *l, const char *key, const char *value)
 /* every key apply() knows, in file order */
 static const char *const k_keys[] = {
     "hue", "opacity", "topmost", "grid", "scanlines", "glow", "start_tab", "font_ui", "font_lcd",
-    "meter_warn", "meter_clip", "meter_hold", "meter_fall", "hidden" };
+    "meter_warn", "meter_clip", "meter_hold", "meter_fall", "hidden", "main", "main_bright", "preset", "layout" };
 #define N_KEYS ((int)(sizeof k_keys / sizeof k_keys[0]))
 
 static void fix_meters(VfLook *l)
@@ -188,6 +212,14 @@ static int format_values(const VfLook *l, char *out, size_t n)
                         l->hue, l->opacity, l->topmost, l->grid, l->scanlines, l->glow, l->start_tab, l->font_ui, l->font_lcd,
                         (double)l->meter_warn_db, (double)l->meter_clip_db, (double)l->meter_hold_s, (double)l->meter_fall, l->hidden);
     if (used < 0 || (size_t)used >= n) return -1;
+    {
+        char mh[8];
+        vf_rgb_format(l->main_rgb, mh);
+        const int k = snprintf(out + used, n - (size_t)used, "main = %s\nmain_bright = %.2f\npreset = %s\nlayout = %s\n",
+                               mh, (double)l->main_bright, l->preset, l->layout);
+        if (k < 0 || (size_t)k >= n - (size_t)used) return -1;
+        used += k;
+    }
     for (int i = 0; i < TC_COUNT; i++) {
         char hex[8];
         vf_rgb_format(l->custom[i], hex);
@@ -200,7 +232,7 @@ static int format_values(const VfLook *l, char *out, size_t n)
 
 void vf_look_write(FILE *f, const VfLook *l)
 {
-    char buf[2048];
+    char buf[4096];
     fputs("\n[look]\n", f);
     if (format_values(l, buf, sizeof buf) > 0) fputs(buf, f);
 }
@@ -280,4 +312,167 @@ void vf_look_set_hidden(VfLook *l, const char *fx, int hidden)
         else if (off > 0) off--;                              /* last item: take the comma before it */
         memmove(l->hidden + off, l->hidden + end, strlen(l->hidden + end) + 1);
     }
+}
+
+/* ---------------------------------------------------------------- main colour, accent, presets */
+
+unsigned vf_hsv_rgb(float h, float s, float v)
+{
+    h = fmodf(h, 360.0f);
+    if (h < 0) h += 360.0f;
+    s = clampf(s, 0, 1); v = clampf(v, 0, 1);
+    const float c = v * s, x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f)), m = v - c;
+    float r, g, b;
+    switch ((int)(h / 60.0f)) {
+    case 0: r = c; g = x; b = 0; break;
+    case 1: r = x; g = c; b = 0; break;
+    case 2: r = 0; g = c; b = x; break;
+    case 3: r = 0; g = x; b = c; break;
+    case 4: r = x; g = 0; b = c; break;
+    default: r = c; g = 0; b = x; break;
+    }
+    return (unsigned)((r + m) * 255.0f + 0.5f) << 16 | (unsigned)((g + m) * 255.0f + 0.5f) << 8 | (unsigned)((b + m) * 255.0f + 0.5f);
+}
+
+void vf_rgb_hsv(unsigned rgb, float *h, float *s, float *v)
+{
+    const float r = (rgb >> 16 & 255) / 255.0f, g = (rgb >> 8 & 255) / 255.0f, b = (rgb & 255) / 255.0f;
+    const float mx = fmaxf(r, fmaxf(g, b)), mn = fminf(r, fminf(g, b)), d = mx - mn;
+    float hh = 0;
+    if (d > 1e-6f) {
+        if (mx == r) hh = fmodf((g - b) / d, 6.0f);
+        else if (mx == g) hh = (b - r) / d + 2.0f;
+        else hh = (r - g) / d + 4.0f;
+        hh *= 60.0f;
+        if (hh < 0) hh += 360.0f;
+    }
+    *h = hh;
+    *s = mx > 1e-6f ? d / mx : 0.0f;
+    *v = mx;
+}
+
+/* chassis colours as (saturation factor, value) of the main colour, measured on the graphite theme
+ * (main = hue 222, intensity 0.67 reproduces it within a few RGB steps); text and display ignore the brightness */
+static const struct { int tc; float sf, v; int lit; } k_chassis[] = {
+    { TC_BG_TOP, 0.45f, 0.169f, 1 }, { TC_BG_BOTTOM, 0.52f, 0.078f, 1 }, { TC_PANEL, 0.49f, 0.129f, 1 },
+    { TC_BEVEL_HI, 0.40f, 0.388f, 1 }, { TC_BEVEL_LO, 0.64f, 0.027f, 0 }, { TC_EDGE, 0.49f, 0.239f, 1 },
+    { TC_SLATE_A, 0.69f, 0.361f, 1 }, { TC_SLATE_B, 0.64f, 0.165f, 1 }, { TC_TEXT, 0.13f, 0.882f, 0 },
+    { TC_TEXT_DIM, 0.31f, 0.592f, 0 }, { TC_TITLE, 0.07f, 0.973f, 0 }, { TC_LCD_BG, 0.60f, 0.059f, 0 },
+    { TC_SEG_OFF, 0.52f, 0.180f, 1 } };
+
+void vf_look_set_main(VfLook *l, unsigned main_rgb, float bright)
+{
+    float h, s, v;
+    vf_rgb_hsv(main_rgb, &h, &s, &v);
+    bright = clampf(bright, 0.6f, 1.8f);
+    for (size_t i = 0; i < sizeof k_chassis / sizeof k_chassis[0]; i++)
+        l->custom[k_chassis[i].tc] = vf_hsv_rgb(h, s * k_chassis[i].sf, k_chassis[i].lit ? clampf(k_chassis[i].v * bright, 0, 0.75f) : k_chassis[i].v);
+    l->main_rgb = main_rgb & 0xFFFFFFu;
+    l->main_bright = bright;
+    l->hue = 0;                                                  /* the main colour replaces the old hue shift */
+}
+
+void vf_look_set_accent(VfLook *l, unsigned rgb)
+{
+    l->custom[TC_ACCENT] = rgb & 0xFFFFFFu;
+    l->custom[TC_ON_BTN] = ((rgb >> 16 & 255) * 6 / 10) << 16 | ((rgb >> 8 & 255) * 6 / 10) << 8 | ((rgb & 255) * 6 / 10);
+}
+
+static const VfLookPreset k_presets[] = {
+    { "graphite", "Graphite", "Grafit", "graphite", 0x395cbf, 0x39ff14, 1.0f },
+    { "amber", "Amber terminal", "Bursztyn", "amber", 0x6b4a1c, 0xffb000, 1.0f },
+    { "classic", "Classic gray", "Szary klasyk", "classic", 0x808080, 0x008000, 1.0f },
+    { "midnight", "Midnight", "Północ", NULL, 0x17338f, 0x00e5ff, 0.9f },
+    { "ocean", "Ocean", "Ocean", NULL, 0x1d5f73, 0x2fe3c8, 1.0f },
+    { "forest", "Forest", "Las", NULL, 0x2f6b3a, 0xb6ff3c, 1.0f },
+    { "synthwave", "Synthwave", "Synthwave", NULL, 0x4a2a80, 0xff40c8, 1.0f },
+    { "sakura", "Sakura", "Sakura", NULL, 0x6b3a55, 0xffb7d5, 1.1f },
+    { "copper", "Copper", "Miedź", NULL, 0x6b4a2a, 0x3fd0c0, 1.0f },
+    { "crimson", "Crimson", "Karmazyn", NULL, 0x6b1f2e, 0xdcf0ff, 0.9f },
+    { "mono", "Mono", "Mono", NULL, 0x808080, 0xe6e6e6, 1.0f },
+    { "lilac", "Lilac", "Bez", NULL, 0x5a4a8a, 0x5cffb0, 1.3f },
+};
+
+int vf_look_preset_count(void) { return (int)(sizeof k_presets / sizeof k_presets[0]); }
+const VfLookPreset *vf_look_preset(int i) { return &k_presets[i >= 0 && i < vf_look_preset_count() ? i : 0]; }
+
+void vf_look_use_preset(VfLook *l, char *theme_id, size_t theme_n, int i)
+{
+    const VfLookPreset *p = vf_look_preset(i);
+    l->hue = 0;
+    if (p->theme) {
+        snprintf(theme_id, theme_n, "%s", p->theme);
+        vf_look_make_custom(l, p->theme);                        /* editing from here starts at this theme */
+        l->main_rgb = p->main;
+        l->main_bright = p->bright;
+    } else {
+        vf_look_make_custom(l, "graphite");                      /* state colours (OFF, warning, error) of the default */
+        vf_look_set_main(l, p->main, p->bright);
+        vf_look_set_accent(l, p->accent);
+        snprintf(theme_id, theme_n, "custom");
+    }
+    snprintf(l->preset, sizeof l->preset, "%s", p->id);
+}
+
+/* ---------------------------------------------------------------- panel layout */
+
+static int name_index(const char *const *names, int n, const char *s, size_t len)
+{
+    for (int i = 0; i < n; i++)
+        if (strlen(names[i]) == len && !strncmp(names[i], s, len)) return i;
+    return -1;
+}
+
+int vf_look_layout(const VfLook *l, const char *const *names, const int *def_page, int n, int *order, int *page)
+{
+    if (n > 64) n = 64;
+    int used[64] = { 0 }, k = 0;
+    for (int i = 0; i < n; i++) page[i] = def_page[i];
+    for (const char *p = l->layout; *p;) {
+        const char *e = strchr(p, ',');
+        const size_t tl = e ? (size_t)(e - p) : strlen(p);
+        const char *colon = memchr(p, ':', tl);
+        const int idx = name_index(names, n, p, colon ? (size_t)(colon - p) : tl);
+        if (idx >= 0 && !used[idx]) {
+            used[idx] = 1;
+            order[k++] = idx;
+            if (colon) page[idx] = clampi(atoi(colon + 1), 0, VF_LOOK_PAGES - 1);
+        }
+        if (!e) break;
+        p = e + 1;
+    }
+    for (int i = 0; i < n; i++)
+        if (!used[i]) order[k++] = i;                            /* effects not in the layout keep chain order */
+    return n;
+}
+
+int vf_look_move(VfLook *l, const char *const *names, const int *def_page, int n, int fx, int to_page, int before_fx)
+{
+    if (n > 64 || fx < 0 || fx >= n || to_page < 0 || to_page >= VF_LOOK_PAGES || before_fx >= n || before_fx == fx) return -1;
+    int order[64], page[64], k = 0, rest[64];
+    vf_look_layout(l, names, def_page, n, order, page);
+    for (int i = 0; i < n; i++)
+        if (order[i] != fx) rest[k++] = order[i];
+    int at = k;                                                  /* insert position in rest[] */
+    if (before_fx >= 0) {
+        for (int i = 0; i < k; i++) if (rest[i] == before_fx) { at = i; break; }
+    } else {
+        for (int i = 0; i < k; i++) if (page[rest[i]] == to_page) at = i + 1;
+    }
+    page[fx] = to_page;
+    int final_[64], m = 0;
+    for (int i = 0; i <= k; i++) {
+        if (i == at) final_[m++] = fx;
+        if (i < k) final_[m++] = rest[i];
+    }
+    char buf[VF_LOOK_LAYOUT_MAX];
+    size_t used = 0;
+    buf[0] = '\0';
+    for (int i = 0; i < m; i++) {
+        const int w = snprintf(buf + used, sizeof buf - used, "%s%s:%d", used ? "," : "", names[final_[i]], page[final_[i]]);
+        if (w < 0 || (size_t)w >= sizeof buf - used) return -1;
+        used += (size_t)w;
+    }
+    snprintf(l->layout, sizeof l->layout, "%s", buf);
+    return 0;
 }
