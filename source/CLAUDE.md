@@ -414,3 +414,14 @@ and autosaved, 20 wheel steps (some over sliders) changed no [fx.*] value, a too
 visible). The vertical wheel (or a sideways wheel) moves the row; the scrollbar is a thin strip under the panels (y 761, just
 above the status bar); a carried panel scrolls the view near the left / right edge; `--scroll PX` = pixels scrolled right.
 Same click test as above (wheel over sliders changed nothing, a tool dragged at the far right end, old layout migrated).
+
+## Navigation modes + "Edit layout" (v1.1.0, 2026-11-15)
+Settings -> Look and window -> "Moving between panels": Vertical (3 columns, scroll down, bar at the right edge) / Sideways (2 rows,
+the default) / Pages (6 panels per page, "<" "Page x / n" ">" on the tab row; the wheel turns one page per gesture; a carried
+panel held 0.7 s at the left / right edge flips the page, one empty page is offered at the end). Stored as `[look] nav` 0/1/2
+(the theme chooser left the Settings tab - themes are on the Look tab). Geometry: `slot_rect()` / `slot_at()` in look_tab.inc.
+"Edit layout" (tab row, every mode) shows every panel, hidden ones too, as a 140 x 62 tile in 6 columns (`draw_layout_editor`):
+title, ON/OFF of effects, the page a tile lands on (page mode), a tick that shows / hides the panel; drag a tile onto another to
+move it (before it, or after it when moving forward). Dragging panels by their title keeps working in all modes.
+Checked with posted clicks on a renamed dev copy: Settings -> Pages, ">" to page 2, Edit layout, a tile dragged forward and one
+hidden -> settings.ini `nav = 2`, the new `layout`, `hidden = rnnoise`.

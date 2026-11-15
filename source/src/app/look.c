@@ -104,6 +104,7 @@ void vf_look_defaults(VfLook *l)
     l->main_rgb = 0x395cbf;                                      /* hue 222, intensity 0.67 = the graphite chassis */
     l->main_bright = 1.0f;
     snprintf(l->preset, sizeof l->preset, "graphite");
+    l->nav = 1;
 }
 
 static int truthy(const char *v) { return v && (atoi(v) != 0 || !strcmp(v, "true") || !strcmp(v, "on")); }
@@ -156,6 +157,7 @@ int vf_look_apply(VfLook *l, const char *key, const char *value)
         if (ok) l->main_rgb = v;
         return ok;
     }
+    if (!strcmp(key, "nav")) { l->nav = clampi(atoi(value), 0, 2); return 1; }
     if (!strcmp(key, "main_bright")) { l->main_bright = clampf((float)atof(value), 0.6f, 1.8f); return 1; }
     if (!strcmp(key, "preset")) {
         if (*value && !id_ok(value)) return 0;
@@ -186,7 +188,7 @@ int vf_look_apply(VfLook *l, const char *key, const char *value)
 /* every key apply() knows, in file order */
 static const char *const k_keys[] = {
     "hue", "opacity", "topmost", "grid", "scanlines", "glow", "start_tab", "font_ui", "font_lcd",
-    "meter_warn", "meter_clip", "meter_hold", "meter_fall", "hidden", "main", "main_bright", "preset", "layout" };
+    "meter_warn", "meter_clip", "meter_hold", "meter_fall", "hidden", "main", "main_bright", "preset", "layout", "nav" };
 #define N_KEYS ((int)(sizeof k_keys / sizeof k_keys[0]))
 
 static void fix_meters(VfLook *l)
@@ -219,8 +221,8 @@ static int format_values(const VfLook *l, char *out, size_t n)
     {
         char mh[8];
         vf_rgb_format(l->main_rgb, mh);
-        const int k = snprintf(out + used, n - (size_t)used, "main = %s\nmain_bright = %.2f\npreset = %s\nlayout = %s\n",
-                               mh, (double)l->main_bright, l->preset, l->layout);
+        const int k = snprintf(out + used, n - (size_t)used, "main = %s\nmain_bright = %.2f\npreset = %s\nlayout = %s\nnav = %d\n",
+                               mh, (double)l->main_bright, l->preset, l->layout, l->nav);
         if (k < 0 || (size_t)k >= n - (size_t)used) return -1;
         used += k;
     }

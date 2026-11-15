@@ -494,6 +494,7 @@ static unsigned long long settings_hash(const VfSession *s, const VfSettings *st
     MIX(st->look.main_rgb); MIX((long long)(st->look.main_bright * 100));
     for (const char *p = st->look.preset; *p; p++) MIX(*p);
     for (const char *p = st->look.layout; *p; p++) MIX(*p);
+    MIX(st->look.nav);
     MIX(st->compact); MIX(st->overlay); MIX(st->overlay_corner); MIX(st->per_mic); MIX(st->auto_mute_lock);
     MIX(st->auto_mute_idle_min); MIX(st->howl_guard); MIX(st->ptt_enabled); MIX(st->apps_enabled); MIX(st->sys_enabled); MIX(st->monitor_raw);
     MIX((long long)(st->monitor_gain_db * 10)); MIX((long long)(st->board_gain_db * 10));
@@ -722,6 +723,7 @@ int main(int argc, char **argv)
     int sel_lang = (int)vf_i18n_get();
     int edit_in = 0, edit_out = 0, edit_preset = 0, edit_name = 0;
     U.drag_fx = -1;
+    U.edit_drag = -1;
     U.tab = tab_arg >= 0 && tab_arg < VF_LOOK_TABS ? tab_arg : st.look.start_tab;   /* 0 main view, 1 settings, 2 look (--tab N for screenshots) */
     if (cal_demo == VF_CAL_SPEECH || cal_demo == VF_CAL_DONE) {          /* --cal-demo 2|3: layout check of the wizard */
         vf_cal_start(&U.cal);
@@ -1145,27 +1147,51 @@ int main(int argc, char **argv)
         for (int oi = 0; oi < np; oi++)
             if (!vf_look_hidden(&st.look, pn_names[pn_ord[oi]])) pn_vis[nvis++] = pn_ord[oi];
         const float pw = 292, ph = 276;
-        /* two rows, scrolled horizontally: panel i sits in column i / 2, row i % 2 */
+        /* geometry by look.nav: 0 scroll down (3 columns), 1 scroll sideways (2 rows), 2 pages of 6 with buttons */
+        const int nav = st.look.nav;
         const Rectangle view = { 282, TOP + 30, 3 * (pw + 6) - 6, 2 * (ph + 6) - 6 };
-        const float content_w = (float)((nvis + 1) / 2) * (pw + 6) - 6;
-        const float max_scroll = content_w > view.width ? content_w - view.width : 0;
-        if (U.drag_fx >= 0) {                                   /* carrying a panel near an edge scrolls the view */
-            if (mouse.x < view.x + 30) U.scroll -= 14;
-            else if (mouse.x > view.x + view.width - 30) U.scroll += 14;
+        const float content = nav == 0 ? (float)((nvis + 2) / 3) * (ph + 6) - 6 : nav == 1 ? (float)((nvis + 1) / 2) * (pw + 6) - 6 : 0;
+        const float view_len = nav == 0 ? view.height : view.width;
+        const float max_scroll = content > view_len ? content - view_len : 0;
+        const int n_pages = nvis > 0 ? (nvis + 5) / 6 : 1;
+        if (U.page > n_pages - 1 + (U.drag_fx >= 0)) U.page = n_pages - 1;   /* while carrying, one empty page more */
+        if (U.page < 0) U.page = 0;
+        if (U.drag_fx >= 0 && U.drag_moved) {                  /* carrying a panel near an edge scrolls / flips the page */
+            const float lo = nav == 0 ? mouse.y - view.y : mouse.x - view.x;
+            const float hi = nav == 0 ? view.y + view.height - mouse.y : view.x + view.width - mouse.x;
+            if (nav != 2) { if (lo < 30) U.scroll -= 14; else if (hi < 30) U.scroll += 14; }
+            else if ((lo < 30 && U.page > 0) || (hi < 30 && U.page < n_pages)) {
+                if (U.flip_t == 0) U.flip_t = vf_now_s();
+                else if (vf_now_s() - U.flip_t > 0.7) { U.page += lo < 30 ? -1 : 1; U.flip_t = 0; }
+            } else U.flip_t = 0;
         }
-        U.scroll = U.scroll < 0 ? 0 : U.scroll > max_scroll ? max_scroll : U.scroll;
+        U.scroll = nav == 2 || U.scroll < 0 ? 0 : U.scroll > max_scroll ? max_scroll : U.scroll;
+        if (U.tab == 0) {                                       /* the bar on the tab row: pages, "Edit layout" */
+            if (nav == 2 && !U.edit) {
+                char pg[48];
+                snprintf(pg, sizeof pg, tr(S_PAGE_FMT), U.page + 1, n_pages);
+                if (GuiButton((Rectangle){ 858, TOP, 28, 24 }, "<") && U.page > 0) U.page--;
+                const float w = MeasureTextEx(F.ui, pg, 16, 0).x;
+                text(F.ui, pg, 950 - w / 2, TOP + 4, C_TEXT);
+                if (GuiButton((Rectangle){ 1014, TOP, 28, 24 }, ">") && U.page < n_pages - 1) U.page++;
+            }
+            if (GuiButton((Rectangle){ 1050, TOP, 120, 24 }, tr(U.edit ? S_EDIT_DONE : S_EDIT_LAYOUT))) { U.edit = !U.edit; U.edit_drag = -1; U.drag_fx = -1; }
+        }
         U.mouse_in_view = CheckCollisionPointRec(mouse, view);
         U.wheel_used = 0;
         U.spectrum_shown = 0;
         const bool grid_was_locked = GuiIsLocked();
-        if (U.tab == 0) {
+        if (U.tab == 0 && U.edit)
+            draw_layout_editor(&s, &st, mouse, view, pn_names, pn_fx, pn_defp, np, pn_ord);
+        else if (U.tab == 0) {
             if (U.drag_fx >= 0 || !U.mouse_in_view) GuiLock();  /* widgets scrolled out of sight must not take clicks */
             BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
         }
-        for (int vi = 0; vi < nvis && U.tab == 0; vi++) {
+        for (int vi = 0; vi < nvis && U.tab == 0 && !U.edit; vi++) {
             const int id = pn_vis[vi];
-            Rectangle box = { view.x + (float)(vi / 2) * (pw + 6) - U.scroll, view.y + (float)(vi % 2) * (ph + 6), pw, ph };
-            if (box.x > view.x + view.width || box.x + pw < view.x) continue;   /* fully out of sight */
+            if (nav == 2 && vi / 6 != U.page) continue;
+            Rectangle box = slot_rect(nav, vi, view, U.scroll);
+            if (!CheckCollisionRecs(box, view)) continue;      /* fully out of sight */
             if (U.drag_fx < 0 && !GuiIsLocked() && U.mouse_in_view && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
                 CheckCollisionPointRec(mouse, (Rectangle){ box.x + 4, box.y + 4, box.width - 140, 24 })) {
                 U.drag_fx = id;                                 /* title strip left of ON/OFF and Reset */
@@ -1264,33 +1290,44 @@ int main(int argc, char **argv)
             }
             GuiEnable();
         }
-        if (U.tab == 0) {
+        if (U.tab == 0 && !U.edit) {
             EndScissorMode();
             if (!grid_was_locked) GuiUnlock();
-            /* horizontal scrollbar under the panels (drag the thumb or use the wheel anywhere but on a slider) */
-            if (max_scroll > 0) {
-                const Rectangle track = { view.x, view.y + view.height + 1, view.width, 4 };
-                const float th_w = fmaxf(40.0f, track.width * view.width / content_w);
-                const Rectangle thumb = { track.x + (track.width - th_w) * (U.scroll / max_scroll), track.y, th_w, track.height };
+            /* scrollbar: right edge (scroll down) or under the panels (sideways); drag the thumb */
+            if (nav != 2 && max_scroll > 0) {
+                const int vert = nav == 0;
+                const Rectangle track = vert ? (Rectangle){ view.x + view.width + 2, view.y, 6, view.height }
+                                             : (Rectangle){ view.x, view.y + view.height + 1, view.width, 4 };
+                const float tlen = vert ? track.height : track.width;
+                const float th_l = fmaxf(40.0f, tlen * view_len / content);
+                const float pos = (tlen - th_l) * (U.scroll / max_scroll);
+                const Rectangle thumb = vert ? (Rectangle){ track.x, track.y + pos, track.width, th_l } : (Rectangle){ track.x + pos, track.y, th_l, track.height };
                 DrawRectangleRec(track, C_LCD_BG);
                 DrawRectangleRec(thumb, U.scroll_drag ? C_NEON : mixc(C_NEON, C_LCD_BG, 0.45f));
-                if (!GuiIsLocked() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
-                    CheckCollisionPointRec(mouse, (Rectangle){ track.x, track.y - 3, track.width, track.height + 6 })) {
+                const Rectangle grab = { track.x - 3, track.y - 3, track.width + 6, track.height + 6 };
+                if (!GuiIsLocked() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, grab)) {
                     U.scroll_drag = 1;
-                    U.scroll_grab = CheckCollisionPointRec(mouse, (Rectangle){ thumb.x, thumb.y - 3, thumb.width, thumb.height + 6 }) ? mouse.x - thumb.x : th_w / 2;
+                    const float m = vert ? mouse.y - thumb.y : mouse.x - thumb.x;
+                    U.scroll_grab = m >= 0 && m <= th_l ? m : th_l / 2;
                 }
                 if (U.scroll_drag) {
                     if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) U.scroll_drag = 0;
-                    else U.scroll = (mouse.x - U.scroll_grab - track.x) / (track.width - th_w) * max_scroll;
+                    else U.scroll = ((vert ? mouse.y - track.y : mouse.x - track.x) - U.scroll_grab) / (tlen - th_l) * max_scroll;
                 }
-                const Vector2 wv = GetMouseWheelMoveV();         /* the vertical wheel (or a sideways one) moves the row */
-                const float wheel = wv.y != 0 ? wv.y : -wv.x;
-                if (wheel != 0 && U.mouse_in_view && !U.wheel_used && !GuiIsLocked()) {
-                    U.scroll -= wheel * 100.0f;
-                    U.scroll_latch = vf_now_s() + 0.4;          /* keep scrolling when a slider slides under the mouse */
-                }
-                U.scroll = U.scroll < 0 ? 0 : U.scroll > max_scroll ? max_scroll : U.scroll;
             }
+            /* the wheel (not on a slider): scrolls, or turns the page */
+            const Vector2 wv = GetMouseWheelMoveV();
+            const float wheel = wv.y != 0 ? wv.y : -wv.x;
+            if (wheel != 0 && U.mouse_in_view && !U.wheel_used && !GuiIsLocked()) {
+                if (nav == 2) {
+                    if (vf_now_s() >= U.scroll_latch) {          /* one page per wheel gesture */
+                        U.page += wheel < 0 ? 1 : -1;
+                        U.page = U.page < 0 ? 0 : U.page > n_pages - 1 ? n_pages - 1 : U.page;
+                    }
+                } else U.scroll -= wheel * 100.0f;
+                U.scroll_latch = vf_now_s() + 0.4;              /* keep the wheel off a slider that slides under the mouse */
+            }
+            U.scroll = nav == 2 || U.scroll < 0 ? 0 : U.scroll > max_scroll ? max_scroll : U.scroll;
             if (U.drag_fx >= 0) drag_panel(&st, mouse, view, pn_names, pn_defp, np, pn_vis, nvis);
         }
 

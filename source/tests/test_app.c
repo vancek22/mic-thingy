@@ -890,6 +890,18 @@ static void test_look_single_view(void)
     vf_look_apply(&s, "start_tab", "5"); CHECK(s.start_tab == 2, "old Look -> look");
     vf_look_apply(&s, "start_tab", "1"); CHECK(s.start_tab == 1, "new value kept");
     CHECK(VF_LOOK_TABS == 3, "three views");
+    VfLook nv;
+    vf_look_defaults(&nv);
+    CHECK(nv.nav == 1, "sideways scrolling is the default (as in v1.0.4.1)");
+    vf_look_apply(&nv, "nav", "7"); CHECK(nv.nav == 2, "nav clamped to pages");
+    vf_look_apply(&nv, "nav", "-3"); CHECK(nv.nav == 0, "nav clamped to vertical");
+    nv.nav = 2;
+    char txt[4096], th[16] = "graphite";
+    vf_look_to_text(&nv, "graphite", txt, sizeof txt);
+    VfLook nb;
+    vf_look_defaults(&nb);
+    vf_look_from_text(&nb, th, sizeof th, txt);
+    CHECK(nb.nav == 2, "nav survives the text round trip");
 }
 
 static void test_settings_ext(void)

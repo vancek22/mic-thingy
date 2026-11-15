@@ -31,6 +31,7 @@ typedef struct VfLook {
     float main_bright;                     /* chassis brightness, 0.6..1.8 (1 = like the built-in dark themes) */
     char  preset[24];                      /* id of the last applied look preset, "" after a manual change */
     char  layout[VF_LOOK_LAYOUT_MAX];      /* effect panel order and page, "name:page,name:page,..." (dragged in the GUI) */
+    int   nav;                             /* main view: 0 scroll down (3 columns), 1 scroll sideways (2 rows), 2 pages of 6 with buttons */
 } VfLook;
 
 /* Ready-made looks. theme != NULL: one of the built-in themes; else main + accent generate the custom theme. */

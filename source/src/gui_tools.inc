@@ -17,9 +17,13 @@ typedef struct Ui {
     int drag_fx;                            /* effect panel being dragged, -1 = none */
     float drag_dx, drag_dy, drag_sx, drag_sy;
     int drag_moved;
+    int edit_drag;                          /* tile carried in the layout editor, -1 = none */
     int scroll_drag;                        /* scrollbar thumb held */
     float scroll_grab;
-    float scroll;                           /* main view: pixels scrolled down */
+    float scroll;                           /* main view: pixels scrolled (down or right, see look.nav) */
+    int page;                               /* main view in page mode: page shown */
+    int edit;                               /* main view: "Edit layout" overview of all panels as tiles */
+    double flip_t;                          /* page mode: when a carried panel started hovering at an edge */
     double scroll_latch;                    /* until then the wheel scrolls even over a slider */
     int wheel_used;                         /* a slider took this frame's wheel */
     int mouse_in_view;                      /* mouse inside the visible part of the main view */
@@ -482,12 +486,13 @@ static void draw_settings(Rectangle area, VfSession *s, VfSettings *st, VfPreset
     box = (Rectangle){ area.x, area.y, pw, ph };
     panel(box, tr(S_PN_LOOK), -1);
     float py = box.y + 36;
-    text(F.ui, tr(S_THEME), box.x + 14, py, C_TEXT);
+    text(F.ui, tr(S_NAV), box.x + 14, py, C_TEXT);          /* themes and colours are on the Look tab */
     py += 24;
-    int th = theme_index(st);
-    const int th0 = th;
-    GuiToggleGroup((Rectangle){ box.x + 14, py, 64, 26 }, tr(S_THEMES), &th);
-    if (th != th0) theme_select(st, th);
+    {
+        int nav = st->look.nav;
+        GuiToggleGroup((Rectangle){ box.x + 14, py, 86, 26 }, tr(S_NAVS), &nav);
+        if (nav != st->look.nav) { st->look.nav = nav; U.scroll = 0; U.page = 0; }
+    }
     py += 40;
     int cmp = U.compact;
     if (check_row(box, &py, tr(S_COMPACT_MODE), &cmp, 1)) apply_window_mode(cmp);

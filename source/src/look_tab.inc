@@ -290,30 +290,53 @@ static const char *panel_title(const char *id)
     return tr_fx(id);
 }
 
-/* A panel carried by its title strip (main_gui.c starts the drag): drop it on another place of the grid. The view
- * scrolls sideways when the panel is carried near its left or right edge. Only the drawing order changes, never the audio chain. */
+/* ---- main view geometry by look.nav: 0 scroll down (3 columns), 1 scroll sideways (2 rows, column by column),
+ * 2 pages of 6 (3 x 2) switched with buttons. vi = index among the visible panels. ---- */
+#define MV_PW 292.0f
+#define MV_PH 276.0f
+
+static Rectangle slot_rect(int nav, int vi, Rectangle view, float scroll)
+{
+    if (nav == 0) return (Rectangle){ view.x + (float)(vi % 3) * (MV_PW + 6), view.y + (float)(vi / 3) * (MV_PH + 6) - scroll, MV_PW, MV_PH };
+    if (nav == 2) { const int j = vi % 6; return (Rectangle){ view.x + (float)(j % 3) * (MV_PW + 6), view.y + (float)(j / 3) * (MV_PH + 6), MV_PW, MV_PH }; }
+    return (Rectangle){ view.x + (float)(vi / 2) * (MV_PW + 6) - scroll, view.y + (float)(vi % 2) * (MV_PH + 6), MV_PW, MV_PH };
+}
+
+/* slot index under the mouse (may be past the last panel), -1 outside the grid */
+static int slot_at(int nav, Vector2 m, Rectangle view, float scroll, int page)
+{
+    if (!CheckCollisionPointRec(m, view)) return -1;
+    if (nav == 0) {
+        const int col = (int)((m.x - view.x) / (MV_PW + 6)), row = (int)((m.y - view.y + scroll) / (MV_PH + 6));
+        return col < 3 ? row * 3 + col : -1;
+    }
+    if (nav == 2) {
+        const int col = (int)((m.x - view.x) / (MV_PW + 6)), row = (int)((m.y - view.y) / (MV_PH + 6));
+        return col < 3 && row < 2 ? page * 6 + row * 3 + col : -1;
+    }
+    const int col = (int)((m.x - view.x + scroll) / (MV_PW + 6)), row = (int)((m.y - view.y) / (MV_PH + 6));
+    return row < 2 ? col * 2 + row : -1;
+}
+
+/* A panel carried by its title strip (main_gui.c starts the drag): drop it on another place of the grid. Near the
+ * edges the view scrolls, or (pages) flips to the neighbouring page. Only the drawing order changes, never the chain. */
 static void drag_panel(VfSettings *st, Vector2 mouse, Rectangle view, const char *const *names, const int *defp, int n,
                        const int *vis_all, int nvis_all)
 {
-    const float pw = 292, ph = 276;
-    const int id = U.drag_fx;
+    const int nav = st->look.nav, id = U.drag_fx;
     if (fabsf(mouse.x - U.drag_sx) + fabsf(mouse.y - U.drag_sy) > 6) U.drag_moved = 1;
     int vis[64], nv = 0;                                   /* visible panels without the carried one */
     for (int k = 0; k < nvis_all && nv < 64; k++)
         if (vis_all[k] != id) vis[nv++] = vis_all[k];
-    int target = -1;
-    if (CheckCollisionPointRec(mouse, view)) {
-        const int col = (int)((mouse.x - view.x + U.scroll) / (pw + 6)), row = (int)((mouse.y - view.y) / (ph + 6));
-        if (col >= 0 && row >= 0 && row < 2) target = col * 2 + row;          /* two rows, column by column */
-        if (target > nv) target = nv;
-    }
+    int target = slot_at(nav, mouse, view, U.scroll, U.page);
+    if (target > nv) target = nv;
     if (U.drag_moved) {
         if (target >= 0) {
             BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
-            DrawRectangleLinesEx((Rectangle){ view.x + (float)(target / 2) * (pw + 6) - U.scroll, view.y + (float)(target % 2) * (ph + 6), pw, ph }, 3, C_NEON);
+            DrawRectangleLinesEx(slot_rect(nav, target, view, U.scroll), 3, C_NEON);
             EndScissorMode();
         }
-        Rectangle g = { mouse.x - U.drag_dx, mouse.y - U.drag_dy, pw, 28 };    /* the carried title strip */
+        Rectangle g = { mouse.x - U.drag_dx, mouse.y - U.drag_dy, MV_PW, 28 };    /* the carried title strip */
         DrawRectangleGradientH((int)g.x, (int)g.y, (int)g.width, (int)g.height, C_SLATE_A, C_SLATE_B);
         DrawRectangleLinesEx(g, 2, C_NEON);
         text(F.bold, panel_title(names[id]), g.x + 10, g.y + 7, C_TITLE);
@@ -321,5 +344,72 @@ static void drag_panel(VfSettings *st, Vector2 mouse, Rectangle view, const char
     if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {                                 /* dropped */
         if (U.drag_moved && target >= 0) vf_look_move(&st->look, names, defp, n, id, 0, target < nv ? vis[target] : -1);
         U.drag_fx = -1;
+        U.flip_t = 0;
+    }
+}
+
+/* "Edit layout": every panel (hidden ones too) as a small tile - the whole layout zoomed out. Drag a tile onto another
+ * to move it there, tick / untick to show / hide the panel. In page mode each tile says which page it lands on. */
+static void draw_layout_editor(VfSession *s, VfSettings *st, Vector2 mouse, Rectangle view, const char *const *names,
+                               const int *fx_of, const int *defp, int n, const int *ord)
+{
+    const float tw = 140, th = 62, gx = 8, gy = 8;
+    const int cols = 6, nav = st->look.nav;
+    VfLook *lk = &st->look;
+    int vis_index[64], vcount = 0;                        /* position among the visible panels (for the page tag) */
+    for (int k = 0; k < n && k < 64; k++) vis_index[k] = vf_look_hidden(lk, names[ord[k]]) ? -1 : vcount++;
+    int hover = -1;
+    for (int k = 0; k < n; k++) {
+        const int id = ord[k];
+        Rectangle r = { view.x + (float)(k % cols) * (tw + gx), view.y + (float)(k / cols) * (th + gy), tw, th };
+        const int hidden = vis_index[k] < 0, carried = U.edit_drag == id;
+        if (CheckCollisionPointRec(mouse, r)) hover = k;
+        Color bg = mixc(C_PANEL, C_BEVEL_HI, hidden ? 0.04f : 0.16f);
+        if (nav == 2 && !hidden && (vis_index[k] / 6) % 2) bg = mixc(bg, C_SLATE_A, 0.25f);   /* every other page tinted */
+        DrawRectangleRec(r, carried ? Fade(bg, 0.4f) : bg);
+        DrawRectangleGradientH((int)r.x, (int)r.y, (int)r.width, 20, hidden ? C_PANEL : C_SLATE_A, hidden ? C_PANEL : C_SLATE_B);
+        DrawRectangleLinesEx(r, 1, hidden ? C_EDGE : mixc(C_PANEL, C_BEVEL_HI, 0.6f));
+        text_fit_head(F.bold, panel_title(names[id]), r.x + 6, r.y + 4, 13, tw - 30, hidden ? C_DISABLED : C_TITLE);
+        bool vis = !hidden;
+        const bool was = vis;
+        GuiCheckBox((Rectangle){ r.x + tw - 20, r.y + 3, 14, 14 }, "", &vis);
+        if (vis != was) vf_look_set_hidden(lk, names[id], !vis);
+        char t[48];
+        if (fx_of[id] >= 0) {                              /* an effect: its on / off state */
+            const int on = !atomic_load(&s->pipe.fx[fx_of[id]]->bypass);
+            DrawCircle((int)r.x + 12, (int)r.y + 36, 4.5f, on ? C_NEON : C_BURG_HI);
+            text(F.ui, on ? "ON" : "OFF", r.x + 22, r.y + 28, hidden ? C_DISABLED : C_TEXT_DIM);
+        }
+        if (nav == 2 && !hidden) {
+            snprintf(t, sizeof t, tr(S_EDIT_PAGE_FMT), vis_index[k] / 6 + 1);
+            text(F.lcd, t, r.x + tw - 6 - MeasureTextEx(F.lcd, t, 14, 0).x, r.y + th - 20, hidden ? C_DISABLED : C_NEON);
+        }
+        if (U.edit_drag < 0 && !GuiIsLocked() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, r) &&
+            !CheckCollisionPointRec(mouse, (Rectangle){ r.x + tw - 24, r.y, 24, 22 })) {
+            U.edit_drag = id;
+            U.drag_dx = mouse.x - r.x; U.drag_dy = mouse.y - r.y;
+        }
+    }
+    const float bottom = view.y + (float)((n + cols - 1) / cols) * (th + gy) + 4;
+    text_fit_head(F.ui, tr(S_EDIT_HINT), view.x, bottom, 15, view.width, C_TEXT_DIM);
+    if (U.edit_drag >= 0) {
+        int from = -1;
+        for (int k = 0; k < n; k++) if (ord[k] == U.edit_drag) from = k;
+        if (hover >= 0 && hover != from) {                 /* insertion mark: before the tile, or after it when moving on */
+            Rectangle r = { view.x + (float)(hover % cols) * (tw + gx), view.y + (float)(hover / cols) * (th + gy), tw, th };
+            const float x = hover > from ? r.x + tw + 3 : r.x - 5;
+            DrawRectangle((int)x, (int)r.y, 3, (int)th, C_NEON);
+        }
+        Rectangle g = { mouse.x - U.drag_dx, mouse.y - U.drag_dy, tw, 20 };
+        DrawRectangleGradientH((int)g.x, (int)g.y, (int)g.width, (int)g.height, C_SLATE_A, C_SLATE_B);
+        DrawRectangleLinesEx(g, 2, C_NEON);
+        text_fit_head(F.bold, panel_title(names[U.edit_drag]), g.x + 6, g.y + 4, 13, tw - 12, C_TITLE);
+        if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            if (hover >= 0 && hover != from && from >= 0) {
+                const int before = hover > from ? (hover + 1 < n ? ord[hover + 1] : -1) : ord[hover];
+                vf_look_move(lk, names, defp, n, U.edit_drag, 0, before);
+            }
+            U.edit_drag = -1;
+        }
     }
 }
