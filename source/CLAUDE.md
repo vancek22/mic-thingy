@@ -425,3 +425,29 @@ title, ON/OFF of effects, the page a tile lands on (page mode), a tick that show
 move it (before it, or after it when moving forward). Dragging panels by their title keeps working in all modes.
 Checked with posted clicks on a renamed dev copy: Settings -> Pages, ">" to page 2, Edit layout, a tile dragged forward and one
 hidden -> settings.ini `nav = 2`, the new `layout`, `hidden = rnnoise`.
+
+## Security / efficiency / leak round (v1.1.0.1, 2026-11-15)
+- **DLL planting**: the .exe imports only Windows "known DLLs" now (kernel32, user32, gdi32, advapi32, shell32, ole32 + the UCRT
+  API sets). `winhttp.dll` (update.c), `dwmapi.dll` and `winmm.dll` (win_chrome.c; raylib's `timeBeginPeriod` / `timeEndPeriod` land
+  in our `__imp_` pointers) are loaded on first use with `vf_load_system_library()` = `LoadLibraryExW(LOAD_LIBRARY_SEARCH_SYSTEM32)`,
+  and `vf_harden_process()` calls `SetDefaultDllDirectories(SYSTEM32 | USER_DIRS)`, which also covers GLFW's and miniaudio's
+  `LoadLibrary("name.dll")`. Never add a library to `target_link_libraries` that is not a known DLL - check with
+  `objdump -p build/mic-thingy.exe | grep "DLL Name"`. Test: garbage `winmm.dll` / `dwmapi.dll` / `winhttp.dll` / `xinput1_4.dll` next
+  to the program - v1.1.0 does not start, this build does; the update check works next to a fake `winhttp.dll`.
+- **Build hardening** (CMakeLists.txt, all targets incl. vendored): `-fstack-protector-strong`; Windows `-static` (else WinLibs GCC
+  pulls in `libssp-0.dll`) + explicit `--dynamicbase --nxcompat --high-entropy-va`; Linux `-z relro -z now -z noexecstack`.
+  `vf-bench` unchanged (default chain 72 us per frame).
+- Linux: the autostart `.desktop` `Exec=` path is escaped (`"` `` ` `` `$` `\` `%`), the update check runs curl with `--proto =https`.
+- GUI: device indices are clamped after a re-enumeration that shortened the list; a running recording / A-B capture is re-attached
+  to the new engine after a stream restart (`engine_init` zeroes the engine, they used to wait forever); a dropped `.ini` over
+  1 MB is refused. `vf_ring_write/read` copy in two `memcpy` blocks.
+- **Leak soak** (renamed dev copy, `start_processing = 0`, 60 s open + 20 x hide to tray / show via posted WM_CLOSE and WM_APP+2):
+  private bytes 192-193 MB open / 124-125 MB in the tray on every cycle, handles 394-398 / 356-360, GDI objects 30 / 19 - flat.
+  USER objects grow by exactly 1 per hide/show cycle (15 -> 35 over 20 cycles; the limit is 10 000) - not found in our code
+  (tray / overlay / icons are balanced), probably GLFW or the GL driver; left as is. Tray CPU 0.00 %.
+  Started hidden (`--minimized`, never opened): 3 MB private. After the window was open once the tray keeps ~125 MB of PRIVATE
+  bytes (the AMD GL driver does not give its heaps back after `CloseWindow`; only the working set is trimmed) - the 0.8-2.3 MB
+  in the M1 note is working set. Fixing that needs the GUI in its own process (M2).
+- Not changed, by reasoning: the update's SHA-256 comes from the same release (no code signing); miniaudio decodes dropped
+  sound files (user action); CPU of hum (+20 us), warmth (+17), voice (+18) - would change the sound.
+- No sanitizers here (MinGW GCC has none, no WSL): memory safety was checked by reading + the tests + the soak above.
