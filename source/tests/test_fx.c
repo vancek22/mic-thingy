@@ -462,6 +462,98 @@ static void test_aec(void)
     vf_sink_free(&ref);
 }
 
+/* One pass of the canceller over a mic / reference pair (a fresh sink, the 480-sample cushion like the app). */
+static void aec_pass(const float *x, const float *d, float *out, long n, float delay_ms, float suppress_db)
+{
+    Fx fx; fx_aec_make(&fx); start(&fx);
+    fx.set_param(&fx, AEC_DELAY_MS, delay_ms);
+    fx.set_param(&fx, AEC_SUPPRESS, suppress_db);
+    static VfSink rs;
+    vf_sink_init(&rs, 480);
+    fx_aec_attach(&fx, &rs);
+    float zeros[480] = { 0 };
+    vf_sink_write(&rs, zeros, 480);
+    for (long off = 0; off + VF_FRAME_SIZE <= n; off += VF_FRAME_SIZE) {
+        vf_sink_write(&rs, x + off, VF_FRAME_SIZE);
+        FxFrameCtx ctx = { 0 };
+        memcpy(out + off, d + off, VF_FRAME_SIZE * sizeof(float));
+        fx.process(&fx, out + off, VF_FRAME_SIZE, &ctx);
+    }
+    fx.destroy(&fx);
+    vf_sink_free(&rs);
+}
+
+/* Harder echo than test_aec: a strongly coloured (speech-like) reference, a nonlinear speaker, a reverberant tail
+ * beyond the filter's 43 ms and a room noise floor only ~3 dB below the echo. NLMS on the raw signals stalls near
+ * 8-10 dB here; the pre-emphasised adaptation + the residual suppressor must do clearly better. */
+static void test_aec_hard(void)
+{
+    printf("echo canceller, hard conditions\n");
+    enum { N = SR * 20 };
+    static float x[N], echo[N], dn[N], de[N], o1[N], o2[N], o3[N];
+    float l1 = 0.0f, l2 = 0.0f;
+    for (long i = 0; i < N; i++) {                                   /* speech-like: two cascaded poles, syllable-rate envelope */
+        l1 = 0.95f * l1 + 0.05f * noise();
+        l2 = 0.85f * l2 + 0.15f * l1;
+        x[i] = 9.0f * l2 * (0.5f + 0.5f * sinf(2.0f * 3.14159f * 3.0f * (float)i / SR));
+    }
+    static const int dly[6] = { 2000, 2300, 2900, 4500, 6200, 8000 };       /* the last three lie beyond 30 ms + 43 ms */
+    static const float gn[6] = { 0.30f, -0.12f, 0.08f, 0.05f, -0.04f, 0.03f };
+    for (long i = 0; i < N; i++) {
+        float e = 0;
+        for (int k = 0; k < 6; k++) if (i >= dly[k]) e += gn[k] * x[i - dly[k]];
+        echo[i] = 0.5f * tanhf(2.0f * e);                            /* loudspeaker nonlinearity */
+    }
+    double pe = 0;
+    for (long i = 0; i < N; i++) pe += (double)echo[i] * echo[i];
+    const float nl = 0.7f * sqrtf((float)(pe / N));                  /* floor: echo power / ~3 dB */
+    for (long i = 0; i < N; i++) { dn[i] = nl * noise(); de[i] = dn[i] + echo[i]; }
+    aec_pass(x, dn, o1, N, 30.0f, 0.0f);                              /* same chain with the echo absent = the floor's own output */
+    aec_pass(x, de, o2, N, 30.0f, 0.0f);
+    aec_pass(x, de, o3, N, 30.0f, 18.0f);
+    double ee = 0, r2 = 0, r3 = 0;
+    for (long i = SR * 14; i < N; i++) {
+        ee += (double)echo[i] * echo[i];
+        const double a = (double)o2[i] - o1[i], b = (double)o3[i] - o1[i];
+        r2 += a * a; r3 += b * b;
+    }
+    const double erle = 10.0 * log10(ee / (r2 + 1e-20)), erle_res = 10.0 * log10(ee / (r3 + 1e-20));
+    printf("  noisy, nonlinear, reverberant echo (14-20 s): ERLE %.1f dB, with the suppressor %.1f dB\n", erle, erle_res);
+    CHECK(erle > 11.0, "ERLE %.1f dB", erle);
+    CHECK(erle_res > erle - 0.5, "the suppressor made the residual worse: %.1f -> %.1f dB", erle, erle_res);
+
+    /* headset: the far end plays but nothing of it reaches the microphone. The suppressor is on by default and has to stay
+     * out of the way (before the ERLE witness it lowered the room noise by several dB in a third of the frames, which
+     * changed what the nn and the gate saw: breath leaked in the headset scenario of tools/run_neartest.sh) */
+    static float o4[N];
+    aec_pass(x, dn, o4, N, 30.0f, 18.0f);
+    double dif = 0, ref0 = 0;
+    for (long i = SR * 4; i < N; i++) { const double a = (double)o4[i] - o1[i]; dif += a * a; ref0 += (double)o1[i] * o1[i]; }
+    const double dlt = 10.0 * log10((dif + 1e-20) / (ref0 + 1e-20));
+    printf("  headset (no echo path): the suppressor changes the output by %.1f dB re the output\n", dlt);
+    CHECK(dlt < -25.0, "the suppressor acts without an echo path: %.1f dB", dlt);
+
+    /* the suppressor must not eat the near end: voiced speech in the second half of an echo-only mic (no floor) */
+    static float sv[N], dd[N], q0[N], q1[N];
+    for (long i = 0; i < N; i++) {
+        double v = 0;
+        for (int h = 1; h <= 12; h++) v += sin(2.0 * PI * 130.0 * h * (double)i / SR) / h;
+        sv[i] = i >= SR * 12 ? (float)(0.12 * v * (0.5 + 0.5 * sin(2.0 * PI * 3.0 * (double)i / SR))) : 0.0f;
+        dd[i] = echo[i] + sv[i];
+    }
+    aec_pass(x, dd, q0, N, 30.0f, 0.0f);
+    aec_pass(x, dd, q1, N, 30.0f, 18.0f);
+    double ss = 0, e0 = 0, e1 = 0;
+    for (long i = SR * 13; i < N; i++) { ss += (double)sv[i] * sv[i]; e0 += (double)(q0[i] - sv[i]) * (q0[i] - sv[i]); e1 += (double)(q1[i] - sv[i]) * (q1[i] - sv[i]); }
+    const double sdr0 = 10.0 * log10(ss / (e0 + 1e-20)), sdr1 = 10.0 * log10(ss / (e1 + 1e-20));
+    printf("  near-end voice in double talk: SDR %.1f dB, with the suppressor %.1f dB\n", sdr0, sdr1);
+    CHECK(sdr1 > sdr0 - 1.0, "the suppressor damaged the near end: SDR %.1f -> %.1f dB", sdr0, sdr1);
+    /* suppression off = switchable: parameter 0 is bit-exact with the plain canceller path (no extra filtering) */
+    static float z0[N];
+    aec_pass(x, dd, z0, N, 30.0f, 0.0f);
+    CHECK(memcmp(z0, q0, sizeof(float) * N) == 0, "suppress 0 is not deterministic");
+}
+
 /* ---- ANC skeleton: simulated ear cup ---- */
 typedef struct { float buf[16]; } Plant;
 static float sec_plant(void *ctx, float y)           /* secondary path S: 3 samples delay 0.6, 5 samples 0.2 */
@@ -695,6 +787,7 @@ int main(void)
 {
     test_chain_defaults();
     test_aec();
+    test_aec_hard();
     test_anc();
     test_hum();
     test_guard();

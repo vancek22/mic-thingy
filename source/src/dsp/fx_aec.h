@@ -13,7 +13,8 @@
 
 enum {
     AEC_DELAY_MS = 0,   /* 0..200 bulk delay of the reference (default 40) */
-    AEC_STRENGTH        /* 0.05..1 NLMS step size (default 0.4) */
+    AEC_STRENGTH,       /* 0.05..1 NLMS step size (default 0.4) */
+    AEC_SUPPRESS        /* 0..30 dB residual echo suppressor, maximum attenuation (default 18, 0 = off) */
 };
 
 #define AEC_TAPS 2048

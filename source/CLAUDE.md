@@ -488,3 +488,65 @@ those frames (nn's VAD reacted to the injected voices), 0.3 s after speech -30 /
 silences the keys completely (-163 dBFS) - so the artifact only exists while the PC plays sound. `mic-thingy-file` takes up to
 128 `-c` commands now (a full [fx.*] section is ~70).
 Not done: real-room echo was never recorded here; the user still has to listen. With headphones the canceller is not needed at all.
+
+## Real headphones -> microphone loop tools (2026-11-16, work in progress)
+User setup: Logitech PRO X headset laid on the EPOS B20 microphone (capture "EPOS", playback "Logitech"; `vf-loop --list`).
+- `vf-loop --in EPOS --out Logitech --far far.wav --mic mic.wav --ref ref.wav [--gain G]`: plays the far end, records the mic and the
+  WASAPI loopback of that device (the app's AEC reference); prints delay / coupling. `--analyze --mic m.wav --ref r.wav` re-measures
+  saved files (sample-level lag up to 1.5 s + an envelope correlation over the whole file; envelope correlation < 0.3 = the mic does not
+  hear the playback, check the placement / raise --gain). Far end is faded in over 1 s, dithered (-80 dB) so loopback keeps delivering.
+- `mic-thingy-file --ref ref.wav`: the file becomes the AEC reference (VfSink target 480 + one zero frame, like the app).
+  The AEC is bypassed by default: `-c "bypass aec off"`.
+- `vf-synth gen|mix|score`: procedural keyboard / mouse / breath with an events CSV, digital mix into a recorded mic, and a scorer
+  (event-window level in -> out per class, level outside events, correlation of the output with the reference).
+First real-path data (babble far end, gain 0.5): delay ~50-60 ms (sample level 49.8 ms, envelope 60 ms), coupling only -41.6 dB, mic
+noise floor close to the echo (correlation 0.18). AEC alone: median level -51.0 -> -58.5 dBFS (delay 20..50 ms all the same, the 2048
+taps cover it). User chain (aec d40 s0.4, nn erbdf, gate 0.79, breath) on mic + synthetic near-end: keys -17.7 dB, mouse -74 dB,
+breath -91 dB, nothing of the reference left (correlation 0.000). Only 7 events in 27 s - needs longer sets and several seeds.
+Open: stronger echo (louder / closer), automatic AEC delay, keys are the weakest class.
+
+### Detailed near-end simulation + AEC round (2026-11-16)
+Tools: `vf-synth gen` now makes 5 classes (keys: clicky / linear / membrane / laptop + space/enter with stabiliser rattle + key-up;
+mouse: click + release, wheel ticks, pad sliding; breath: nasal / mouth / sigh / plosive puff; mouth: lip smack, tongue click, swallow,
+throat clear; bump: desk thump, chair creak) through a small room (`--room`), `voicemap` (speech segments), `echo` (the reference as the
+microphone hears it: delay, tanh speaker, clock drift, band limit, early reflections + diffuse tail), `silence`, `mix` (`~file.wav` =
+subtract), `levels` (per-second dBFS side by side), `score` (per class: energy / peak change, share still audible, voice level and
+onset loss, correlation of the output with the reference). `tools/run_neartest.sh TAG "cmd;cmd"` runs scenarios pauses / echo / quiet /
+talking x SEEDS (default 4) through the production chain with the user's settings (aec 40/0.4, nn erbdf, gate 0.79, breath) and prints
+means. Needs `build/looptest/floor_mic.wav` (vf-loop with a silent far end = the real EPOS floor), `ref_babble2.wav` (real loopback).
+Findings (all numbers on the real floor + synthetic events):
+- No echo (headset on the head: pauses / quiet): the chain removes the events (keys -70..-80 dB, bump / mouth / breath < -100 dB).
+- With echo (echo -46 dBFS next to a floor of -48 dBFS = the real headphones-on-mic coupling) events LEAK (keys -13 dB energy, 87 % still
+  audible; breath -13 dB). Without the AEC the nn VAD stays high on voice-like echo; echo 20 dB quieter (gain -35 dB) -> removed. So the
+  weak point is the echo residue after the AEC, which has to be below ~ -65 dBFS for nn + gate to behave.
+- AEC ERLE with that floor: 8-17 dB (misadjustment / noise limited; a clean path gives 40-100 dB). The echo canceller has to be measured
+  against a MATCHED reference run (chain on floor alone), not `out - floor`: the 80 Hz high-pass already changes the floor (first
+  version of the measurement said 8 dB, the real figure was 17 dB).
+- Changes kept in `fx_aec.c`: (1) NLMS adapts on pre-emphasised reference / error (`AEC_WHITEN` 0.7; the weights are the same
+  linear system, filtering stays on the raw signals): synthetic ERLE 76 -> ~100 dB, double-talk SDR 8.7 -> 15 dB, headset test unchanged;
+  on the noise-limited real recording it is neutral. (2) new param `suppress` (dB, default 18 since the user asked for it on 2026-11-16; 0 = off = bit-exact old behaviour): residual echo
+  suppressor - per-bin gains from the learned residual / reference ratio (floor subtracted via a lower-envelope estimate, ratio learned
+  fast-down / slow-up so near-end speech is not learned as echo, scaled by the NLMS echo-path confidence so a headset is untouched),
+  applied as a 128-tap minimum-phase FIR on the same frame (no delay). On the real loop recording: median level -59.1 -> -63.4 dBFS,
+  p10 -72.8 -> -77.2 with 18 dB (old AEC: -58.5 / -72.3). In the scenario matrix the effect is mixed (keys peak -18 -> -28 dB, mouth
+  and mouse mixed). Made the default (18 dB) at the user's request.
+- `suppress` is now ON by default (18 dB), at the user's request (2026-11-16). The 8-seed matrix (tools/run_neartest.sh) then showed it
+  hurt the HEADSET scenarios (breath audible 0 -> 20 % in "pauses", mouse in "talking" 8 -> 33 %): `apply` (the NLMS projection that gated
+  the suppressor) is >= 0.95 in ~35 % of the frames even with NO echo path (2048 taps fit the room noise), mean conf 0.51 vs 0.71-0.75
+  with a real / simulated echo, so the suppressor lowered the noise floor by 0-6 dB and tipped the nn VAD / gate. Fix: a second witness
+  in `res_stage` - the microphone / error power ratio over ~2 s (`lpd`, `lpe`, updated only while the reference plays): 0-1 dB with a
+  headset / speech / silence, 3-4.4 dB with an echo (real loop 2-6 dB). conf = min(projection, clamp((ERLE_dB - 2) / 2)). Result, same 8
+  seeds: "talking" and the headset breath identical to `suppress 0` again, echo scenario keeps most of the gain (keys peak -21.7 -> -26.1 dB,
+  audible 83 -> 79 %; mouth got worse: -30 -> -22 dB energy, 62 -> 75 % audible), real loop recording unchanged (AEC only, per-second
+  levels: median -53.4 -> -55.3 dBFS, p10 -65.3 -> -67.2). `test_aec_hard` checks that without an echo path the output with 18 dB equals
+  the output with 0. Caveat: an echo weaker than the floor (SNR < 0 dB) cannot reach 3 dB ERLE against the microphone, so there the
+  suppressor stays off by design. The instantaneous (7 ms) ERLE was useless as a witness (10-20 dB in 16 % of the headset frames).
+- Tried and dropped: a step size shrinking to 0.3x after convergence (+4..6 dB ERLE in a 20 ppm drift simulation, -2.5 dB on the real
+  recording: two real devices drift much more and the filter has to track); slower smoothing of the `apply` projection (no gain);
+  an earlier filter window (`aec delay` 10..40 hardly matters).
+- Voice onset loss in the `talking` scenario (first 50 ms of a segment vs the rest) swings 13..21 dB between near-identical settings
+  (also 13.4 dB with the AEC bypassed): it is not a usable discriminator with 6-8 seeds. Voice level change is stable at -0.8..-1.0 dB.
+- New `test_fx` case "echo canceller, hard conditions" (speech-like reference, tanh speaker, tail beyond 43 ms, floor 3 dB under the echo):
+  ERLE > 11 dB (13.3), suppressor must not lower ERLE or the near-end SDR by more than 1 dB, suppress 0 deterministic.
+- Not done: automatic AEC delay, a transient (click) guard BEFORE the nn (keys at 0.8-3 s after the start leak while the AEC is still
+  converging, ~10 s here), stronger-coupling recordings, listening tests.

@@ -309,6 +309,7 @@ static const Pair k_params[] = {
     { "limiter.lookahead", "Look-ahead", "Wyprzedzenie" },
     { "aec.delay",         "Reference delay", "Opóźnienie referencji" },
     { "aec.strength",      "Adaptation", "Adaptacja" },
+    { "aec.suppress",      "Residual echo suppression", "Tłumienie reszty echa" },
     { "hum.freq",          "Mains frequency", "Częstotliwość sieci" },
     { "hum.harmonics",     "Harmonics", "Harmoniczne" },
     { "hum.auto",          "Detect 50/60 Hz automatically", "Wykrywaj 50/60 Hz automatycznie" },

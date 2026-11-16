@@ -12,7 +12,9 @@
 #include <string.h>
 
 #include "app/calibrate.h"
+#include "audio/sink.h"
 #include "dsp/chain.h"
+#include "dsp/fx_aec.h"
 #include "util/cmdline.h"
 #include "util/wavio.h"
 
@@ -31,7 +33,7 @@ static void usage(void)
 
 int main(int argc, char **argv)
 {
-    const char *in_path = NULL, *out_path = NULL, *dbg_path = NULL, *csv_path = NULL;
+    const char *in_path = NULL, *out_path = NULL, *dbg_path = NULL, *csv_path = NULL, *ref_path = NULL;
     const char *cmds[MAX_CMDS];
     int ncmd = 0, bypass = 0, calibrate = 0;
     for (int i = 1; i < argc; i++) {
@@ -40,6 +42,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-c") && i + 1 < argc && ncmd < MAX_CMDS) cmds[ncmd++] = argv[++i];
         else if (!strcmp(argv[i], "--debug") && i + 1 < argc) dbg_path = argv[++i];
         else if (!strcmp(argv[i], "--csv") && i + 1 < argc) csv_path = argv[++i];
+        else if (!strcmp(argv[i], "--ref") && i + 1 < argc) ref_path = argv[++i];
         else if (!strcmp(argv[i], "--bypass")) bypass = 1;
         else if (!strcmp(argv[i], "--calibrate")) calibrate = 1;
         else { usage(); return 2; }
@@ -67,6 +70,18 @@ int main(int argc, char **argv)
     }
     if (bypass) atomic_store(&pipe.bypass_all, 1);
 
+    /* --ref: the "system loopback" for the echo canceller, fed like the app does (sink, 480-sample cushion) */
+    static VfSink refsink;
+    float *refbuf = NULL;
+    long reflen = 0;
+    if (ref_path) {
+        refbuf = vf_wav_read_mono(ref_path, VF_SAMPLE_RATE, &reflen);
+        if (!refbuf || vf_sink_init(&refsink, 480) != 0) { fprintf(stderr, "cannot read %s\n", ref_path); return 1; }
+        fx_aec_attach(&chain.aec, &refsink);
+        float zeros[VF_FRAME_SIZE] = { 0 };
+        vf_sink_write(&refsink, zeros, VF_FRAME_SIZE);
+    }
+
     const long nframes = (len + VF_FRAME_SIZE - 1) / VF_FRAME_SIZE;
     const long total = nframes * VF_FRAME_SIZE;
     float *out = (float *)calloc((size_t)total, sizeof *out);
@@ -84,6 +99,11 @@ int main(int argc, char **argv)
             frame[i] = off + i < len ? in[off + i] : 0.0f;
         if (dbg) for (int i = 0; i < VF_FRAME_SIZE; i++) dbg[(off + i) * 4 + 0] = frame[i];
 
+        if (refbuf) {
+            float rf[VF_FRAME_SIZE];
+            for (int i = 0; i < VF_FRAME_SIZE; i++) rf[i] = off + i < reflen ? refbuf[off + i] : 0.0f;
+            vf_sink_write(&refsink, rf, VF_FRAME_SIZE);
+        }
         memcpy(raw, frame, sizeof raw);
         pipeline_process(&pipe, frame);
         if (calibrate) {
